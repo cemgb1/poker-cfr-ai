@@ -328,7 +328,7 @@ def quick_test():
     print("=" * 40)
     
     cfr_test = EnhancedPostflopCFRTest()
-    cfr_test.train_test(test_iterations=200, checkpoint_every=50)
+    cfr_test.train_test(test_iterations=150, checkpoint_every=50)
     
     # Quick analysis
     trained_count = len([s for s in cfr_test.scenario_counter if cfr_test.scenario_counter[s] > 0])
