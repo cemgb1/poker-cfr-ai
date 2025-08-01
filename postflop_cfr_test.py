@@ -1,5 +1,6 @@
 import random
 import csv
+import time
 from collections import defaultdict
 
 # === CONFIG ===
@@ -27,6 +28,8 @@ strategy_map = defaultdict(lambda: defaultdict(float))
 scenario_visits = defaultdict(int)
 scenarios = generate_scenarios()
 
+start_time = time.time()
+
 for iteration in range(MAX_ITERATIONS):
     for hand, board, position, history in scenarios:
         info_set = f"{hand}|{''.join(board)}|{position}|{history}"
@@ -36,6 +39,12 @@ for iteration in range(MAX_ITERATIONS):
             strategy[a] /= total  # Normalize
         strategy_map[info_set] = strategy
         scenario_visits[info_set] += 1
+
+    if (iteration + 1) % 50 == 0 or iteration == MAX_ITERATIONS - 1:
+        print(f"✅ Completed iteration {iteration + 1} of {MAX_ITERATIONS}")
+
+end_time = time.time()
+print(f"\n🕒 Finished training in {round(end_time - start_time, 2)} seconds.")
 
 # === CSV OUTPUT ===
 def parse_info_set(info_set):
