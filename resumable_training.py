@@ -1,8 +1,3 @@
-# Remove the broken file and create a clean one
-rm resumable_training.py
-
-# Create clean resumable_training.py
-cat > resumable_training.py << 'EOF'
 #!/usr/bin/env python3
 """
 Enhanced training script with checkpointing support
@@ -97,13 +92,3 @@ if __name__ == "__main__":
         resume_from_checkpoint()
     else:
         run_resumable_training()
-EOF
-
-# Make it executable
-chmod +x resumable_training.py
-
-# Test that it works
-python -c "import resumable_training; print('✅ resumable_training.py syntax OK')"
-
-# Start training
-python resumable_training.py 2>&1 | tee training_with_checkpoints.log
