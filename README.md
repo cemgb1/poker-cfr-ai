@@ -222,3 +222,102 @@ Whether you're a poker player wanting to improve, a developer learning AI techni
 ---
 
 *Built with game theory, optimized for the cloud, designed for real-world impact.*
+
+✅ All scenarios trained to 300+ visits at iteration 239400
+
+🎯 Training Complete!
+Total iterations: 239400
+Hands seen: 169
+Scenarios trained: 798
+
+📊 PREFLOP TRAINING ANALYSIS
+================================================================================
+Scenario coverage: 798/798 (100.0%)
+
+Key Strategies by Position:
+--------------------------------------------------
+
+Opening from Button:
+Group                    Fold%   Call%   Raise%  Action
+------------------------------------------------------------
+medium_aces_offsuit       0.1%    9.3%   90.6%   RAISE
+medium_aces_suited        0.1%    0.3%   99.6%   RAISE
+medium_kings_suited       0.2%    1.9%   97.9%   RAISE
+medium_pairs              0.2%    0.3%   99.5%   RAISE
+offsuit_broadways         0.1%    1.6%   98.3%   RAISE
+offsuit_trash             0.1%   99.0%    0.8%   CALL
+premium_aces_offsuit      0.1%    0.8%   99.1%   RAISE
+premium_aces_suited       0.1%    0.2%   99.7%   RAISE
+premium_kings_offsuit     0.1%   29.8%   70.0%   RAISE
+premium_kings_suited      0.1%    0.5%   99.4%   RAISE
+
+Defending Big Blind vs Raise:
+Group                    Fold%   Call%   Raise%  Action
+------------------------------------------------------------
+medium_aces_offsuit       0.2%   98.8%    1.0%   CALL
+medium_aces_suited        0.4%   11.3%   88.3%   RAISE
+medium_kings_suited       0.1%   98.3%    1.7%   CALL
+medium_pairs              0.2%    0.8%   99.0%   RAISE
+offsuit_broadways         0.1%   99.7%    0.2%   CALL
+offsuit_trash             0.0%   99.4%    0.6%   CALL
+premium_aces_offsuit      0.2%    0.4%   99.5%   RAISE
+premium_aces_suited       0.2%    0.9%   99.0%   RAISE
+premium_kings_offsuit     0.2%   12.9%   86.9%   RAISE
+premium_kings_suited      0.2%    0.4%   99.4%   RAISE
+
+Button vs Check-Raise:
+Group                    Fold%   Call%   Raise%  Action
+------------------------------------------------------------
+medium_aces_offsuit       0.0%    0.8%   99.1%   RAISE
+medium_aces_suited        0.0%    2.3%   97.6%   RAISE
+medium_kings_suited       0.2%   97.0%    2.8%   CALL
+medium_pairs              0.0%    0.7%   99.2%   RAISE
+offsuit_broadways         0.0%   98.8%    1.2%   CALL
+offsuit_trash             0.8%   92.7%    6.5%   CALL
+premium_aces_offsuit      0.0%    1.0%   99.0%   RAISE
+premium_aces_suited       0.0%    0.9%   99.0%   RAISE
+premium_kings_offsuit     0.0%    0.5%   99.4%   RAISE
+premium_kings_suited      0.0%    0.2%   99.8%   RAISE
+
+🎯 STRATEGY LOOKUP TEST
+======================================================================
+Hand  Position  Situation       Action    Confidence  Probabilities
+----------------------------------------------------------------------
+AA    BTN      Opening         RAISE        99.6%  F:0.00 C:0.00 R:1.00
+AA    BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:1.00
+        
+AA    BTN      vs C-Raise      RAISE        99.5%  F:0.00 C:0.00 R:1.00
+KK    BTN      Opening         RAISE        99.6%  F:0.00 C:0.00 R:1.00
+KK    BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:1.00
+KK    BTN      vs C-Raise      RAISE        99.5%  F:0.00 C:0.00 R:1.00
+AKs   BTN      Opening         RAISE        99.7%  F:0.00 C:0.00 R:1.00
+AKs   BB       vs Raise        RAISE        99.0%  F:0.00 C:0.01 R:0.99
+AKs   BTN      vs C-Raise      RAISE        99.0%  F:0.00 C:0.01 R:0.99
+AKo   BTN      Opening         RAISE        99.1%  F:0.00 C:0.01 R:0.99
+AKo   BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:0.99
+AKo   BTN      vs C-Raise      RAISE        99.0%  F:0.00 C:0.01 R:0.99
+QQ    BTN      Opening         RAISE        99.6%  F:0.00 C:0.00 R:1.00
+QQ    BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:1.00
+QQ    BTN      vs C-Raise      RAISE        99.5%  F:0.00 C:0.00 R:1.00
+JJ    BTN      Opening         RAISE        99.5%  F:0.00 C:0.00 R:0.99
+JJ    BB       vs Raise        RAISE        99.0%  F:0.00 C:0.01 R:0.99
+JJ    BTN      vs C-Raise      RAISE        99.2%  F:0.00 C:0.01 R:0.99
+AQs   BTN      Opening         RAISE        99.7%  F:0.00 C:0.00 R:1.00
+AQs   BB       vs Raise        RAISE        99.0%  F:0.00 C:0.01 R:0.99
+AQs   BTN      vs C-Raise      RAISE        99.0%  F:0.00 C:0.01 R:0.99
+KQs   BTN      Opening         RAISE        99.4%  F:0.00 C:0.00 R:0.99
+KQs   BB       vs Raise        RAISE        99.4%  F:0.00 C:0.00 R:0.99
+KQs   BTN      vs C-Raise      RAISE        99.8%  F:0.00 C:0.00 R:1.00
+22    BTN      Opening         RAISE        99.7%  F:0.00 C:0.00 R:1.00
+22    BB       vs Raise        CALL         99.7%  F:0.00 C:1.00 R:0.00
+22    BTN      vs C-Raise      CALL         96.7%  F:0.00 C:0.97 R:0.03
+T9s   BTN      Opening         RAISE        99.0%  F:0.00 C:0.01 R:0.99
+T9s   BB       vs Raise        CALL         98.5%  F:0.00 C:0.99 R:0.01
+T9s   BTN      vs C-Raise      RAISE        99.7%  F:0.00 C:0.00 R:1.00
+
+✅ Preflop training complete!
+✅ All 169 hands covered with strategic grouping
+✅ Equal distribution training ensures no blind spots
+
+✅ Preflop completed in 0.8 minutes
+Memory usage: 28.7 MB
