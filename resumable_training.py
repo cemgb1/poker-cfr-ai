@@ -1,13 +1,14 @@
-# Create new resumable training script
+# Remove the broken file and create a clean one
+rm resumable_training.py
+
+# Create clean resumable_training.py
 cat > resumable_training.py << 'EOF'
 #!/usr/bin/env python3
 """
 Enhanced training script with checkpointing support
 """
-
 import time
 import psutil
-import os
 import subprocess
 
 def run_resumable_training():
@@ -38,7 +39,7 @@ def run_resumable_training():
         preflop_solver.train_with_checkpoints(
             total_iterations=300000,
             min_visits_per_scenario=300,
-            checkpoint_every=500  # Save every 25k iterations
+            checkpoint_every=500  # Save every 500 iterations
         )
         
         # For now, use regular postflop (until we add resumable postflop)
@@ -86,7 +87,7 @@ def resume_from_checkpoint():
     preflop_solver.train_with_checkpoints(
         total_iterations=300000,
         resume_from=latest['path'],
-        checkpoint_every=25000
+        checkpoint_every=500
     )
 
 if __name__ == "__main__":
@@ -100,3 +101,9 @@ EOF
 
 # Make it executable
 chmod +x resumable_training.py
+
+# Test that it works
+python -c "import resumable_training; print('✅ resumable_training.py syntax OK')"
+
+# Start training
+python resumable_training.py 2>&1 | tee training_with_checkpoints.log
