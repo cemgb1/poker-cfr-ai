@@ -38,7 +38,7 @@ def run_resumable_training():
         preflop_solver.train_with_checkpoints(
             total_iterations=300000,
             min_visits_per_scenario=300,
-            checkpoint_every=25000  # Save every 25k iterations
+            checkpoint_every=500  # Save every 25k iterations
         )
         
         # For now, use regular postflop (until we add resumable postflop)
