@@ -223,6 +223,8 @@ Whether you're a poker player wanting to improve, a developer learning AI techni
 
 *Built with game theory, optimized for the cloud, designed for real-world impact.*
 
+```
+
 ✅ All scenarios trained to 300+ visits at iteration 239400
 
 🎯 Training Complete!
@@ -285,7 +287,6 @@ Hand  Position  Situation       Action    Confidence  Probabilities
 ----------------------------------------------------------------------
 AA    BTN      Opening         RAISE        99.6%  F:0.00 C:0.00 R:1.00
 AA    BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:1.00
-        
 AA    BTN      vs C-Raise      RAISE        99.5%  F:0.00 C:0.00 R:1.00
 KK    BTN      Opening         RAISE        99.6%  F:0.00 C:0.00 R:1.00
 KK    BB       vs Raise        RAISE        99.5%  F:0.00 C:0.00 R:1.00
@@ -321,3 +322,5 @@ T9s   BTN      vs C-Raise      RAISE        99.7%  F:0.00 C:0.00 R:1.00
 
 ✅ Preflop completed in 0.8 minutes
 Memory usage: 28.7 MB
+
+```
