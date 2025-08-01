@@ -511,112 +511,6 @@ class ResumablePreflopCFR:
         else:
             return None, f"No strategy learned for {info_set}"
 
-    def analyze_results(self):
-        """Analyze training results and show key strategies"""
-        print(f"\n📊 PREFLOP TRAINING ANALYSIS")
-        print("=" * 80)
-        
-        # Show coverage
-        trained_scenarios = len([s for s in self.all_preflop_scenarios if self.info_set_counter[s] > 0])
-        coverage = trained_scenarios / len(self.all_preflop_scenarios) * 100
-        print(f"Scenario coverage: {trained_scenarios}/{len(self.all_preflop_scenarios)} ({coverage:.1f}%)")
-        
-        # Show hand group strategies
-        print(f"\nKey Strategies by Position:")
-        print("-" * 50)
-        
-        test_situations = [
-            ("BTN", "", "Opening from Button"),
-            ("BB", "r", "Defending Big Blind vs Raise"),
-            ("BTN", "cr", "Button vs Check-Raise")
-        ]
-        
-        unique_groups = sorted(set(self.hand_groups.values()))[:10]  # Show first 10 groups
-        
-        for situation_pos, situation_hist, situation_desc in test_situations:
-            print(f"\n{situation_desc}:")
-            print("Group                    Fold%   Call%   Raise%  Action")
-            print("-" * 60)
-            
-            for group in unique_groups:
-                info_set = f"{group}|{situation_pos}|{situation_hist}|deep"
-                if info_set in self.strategy_sum and np.sum(self.strategy_sum[info_set]) > 0:
-                    strategy = self.get_average_strategy(info_set)
-                    best_action = ["FOLD", "CALL", "RAISE"][np.argmax(strategy)]
-                    print(f"{group:24s} {strategy[0]:5.1%}   {strategy[1]:5.1%}   {strategy[2]:5.1%}   {best_action}")
-
-    def test_hand_lookup(self, test_hands=None):
-        """Test strategy lookup for specific hands"""
-        if test_hands is None:
-            test_hands = ['AA', 'KK', 'AKs', 'AKo', 'QQ', 'JJ', 'AQs', 'KQs', '22', 'T9s']
-        
-        print(f"\n🎯 STRATEGY LOOKUP TEST")
-        print("=" * 70)
-        print("Hand  Position  Situation       Action    Confidence  Probabilities")
-        print("-" * 70)
-        
-        situations = [
-            ("BTN", "", "Opening"),
-            ("BB", "r", "vs Raise"),
-            ("BTN", "cr", "vs C-Raise")
-        ]
-        
-        for hand in test_hands:
-            for pos, hist, desc in situations:
-                result, error = self.get_strategy_for_hand(hand, pos, hist, "deep")
-                if result:
-                    print(f"{hand:5s} {pos:8s} {desc:15s} {result['recommended_action']:8s} "
-                          f"{result['confidence']:9.1%}  F:{result['fold_prob']:.2f} "
-                          f"C:{result['call_prob']:.2f} R:{result['raise_prob']:.2f}")
-                else:
-                    print(f"{hand:5s} {pos:8s} {desc:15s} NO DATA")
-
-
-class ResumableTrainingOrchestrator:
-    """
-    Orchestrates training of both preflop and postflop with checkpointing
-    """
-    
-    def __init__(self):
-        self.checkpoint_manager = CheckpointManager()
-    
-    def run_full_training_with_checkpoints(self, checkpoint_every=5000):
-        """Run complete training with checkpointing"""
-        
-        print("🚀 RESUMABLE CFR TRAINING WITH CHECKPOINTS")
-        print("=" * 60)
-        
-        # Check for existing checkpoints
-        checkpoints = self.checkpoint_manager.list_checkpoints()
-        
-        if checkpoints:
-            print("📂 Found existing checkpoints:")
-            for cp in checkpoints[-3:]:  # Show last 3
-                print(f"   {cp['filename']}: iteration {cp['iteration']}, {cp['size_mb']} MB")
-            
-            print("\nTo resume from latest checkpoint, use resume_from parameter")
-        
-        # Train preflop with checkpoints
-        print("\n1️⃣ Training Preflop with Checkpoints...")
-        preflop_solver = ResumablePreflopCFR(checkpoint_manager=self.checkpoint_manager)
-        preflop_solver.train_with_checkpoints(
-            total_iterations=300000,
-            checkpoint_every=checkpoint_every
-        )
-        
-        # Train postflop (use existing implementation for now)
-        print("\n2️⃣ Training Postflop...")
-        try:
-            from postflop_cfr import run_postflop_training
-            postflop_solver = run_postflop_training(preflop_solver)
-        except ImportError:
-            print("⚠️ Postflop module not available, skipping...")
-            postflop_solver = None
-        
-        print("✅ Complete training with checkpoints finished!")
-        
-        return preflop_solver, postflop_solver
-
 
 def run_preflop_training_with_checkpoints():
     """Main function to run preflop training with checkpoints"""
@@ -627,13 +521,7 @@ def run_preflop_training_with_checkpoints():
     cfr = ResumablePreflopCFR()
     
     # Train with checkpoints
-    cfr.train_with_checkpoints(total_iterations=300000, min_visits_per_scenario=300, checkpoint_every=2500)
-    
-    # Analyze results
-    cfr.analyze_results()
-    
-    # Test specific hands
-    cfr.test_hand_lookup()
+    cfr.train_with_checkpoints(total_iterations=300000, min_visits_per_scenario=300, checkpoint_every=500)
     
     print(f"\n✅ Preflop training with checkpoints complete!")
     print(f"✅ All 169 hands covered with strategic grouping")
@@ -642,38 +530,5 @@ def run_preflop_training_with_checkpoints():
     return cfr
 
 
-def quick_checkpoint_demo():
-    """Demonstrate checkpoint functionality"""
-    
-    print("🎯 CHECKPOINT SYSTEM DEMO")
-    print("=" * 40)
-    
-    # Create checkpoint manager
-    cm = CheckpointManager("demo_checkpoints")
-    
-    # Create simple CFR solver
-    cfr = ResumablePreflopCFR(checkpoint_manager=cm)
-    
-    # Train for a bit
-    cfr.train_with_checkpoints(total_iterations=1000, checkpoint_every=250)
-    
-    # List checkpoints
-    print("\n📂 Available checkpoints:")
-    checkpoints = cm.list_checkpoints()
-    for cp in checkpoints:
-        print(f"   {cp['filename']}: iter {cp['iteration']}, {cp['scenarios_trained']} scenarios")
-    
-    # Demonstrate resume
-    if checkpoints:
-        print(f"\n🔄 Demonstrating resume from {checkpoints[-1]['filename']}")
-        new_cfr = ResumablePreflopCFR(checkpoint_manager=cm)
-        new_cfr.load_from_checkpoint(checkpoints[-1]['path'])
-        print(f"✅ Resumed at iteration {new_cfr.iterations}")
-
-
 if __name__ == "__main__":
-    # Run checkpoint demo
-    # quick_checkpoint_demo()
-    
-    # Or run full training with checkpoints
     run_preflop_training_with_checkpoints()
