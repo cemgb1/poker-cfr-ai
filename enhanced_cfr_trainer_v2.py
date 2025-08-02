@@ -17,22 +17,26 @@ class EnhancedCFRTrainer:
     Enhanced CFR with tournament survival, stack awareness, and bet sizing
     """
     
-    def __init__(self, n_scenarios=1000):
+    class EnhancedCFRTrainer:
+    def __init__(self, scenarios=None, n_scenarios=1000):
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
         self.strategy_sum = defaultdict(lambda: defaultdict(float))
         self.scenario_counter = Counter()
         self.iterations = 0
-        
+
         # Enhanced tracking
         self.stack_survival_rate = []
         self.tournament_results = []
         self.equity_by_stack = defaultdict(list)
-        
-        # Generate enhanced scenarios
-        print(f"🚀 Initializing Enhanced CFR with {n_scenarios} scenarios...")
-        self.scenarios = generate_enhanced_scenarios(n_scenarios)
-        
+
+        # Generate enhanced scenarios, or use provided ones
+        if scenarios is not None:
+            self.scenarios = scenarios
+            print(f"🚀 Initializing Enhanced CFR with {len(scenarios)} scenarios (from batch)...")
+        else:
+            self.scenarios = generate_enhanced_scenarios(n_scenarios)
+            print(f"🚀 Initializing Enhanced CFR with {n_scenarios} scenarios...")
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
         print(f"🧠 Features: Stack survival, bet sizing, tournament logic")
