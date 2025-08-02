@@ -16,7 +16,7 @@ class ParallelCFRTrainer:
     Parallel CFR trainer that uses all CPU cores for maximum performance
     """
     
-    def __init__(self, n_scenarios=1000, n_workers=None):
+    def __init__(self, n_scenarios=100, n_workers=None):
         # Auto-detect CPU cores or use specified number
         self.n_workers = n_workers or mp.cpu_count()
         print(f"🚀 Initializing Parallel CFR with {self.n_workers} workers")
@@ -51,12 +51,14 @@ class ParallelCFRTrainer:
         local_start_time = time.time()
         
         for iteration in range(iterations_per_worker):
-            # Random scenario from worker's batch
             scenario = random.choice(scenarios_batch)
-            
-            # Train on scenario
+            print(f"[Worker {worker_id}] Iteration {iteration + 1}/{iterations_per_worker}")
+            print(f"  Scenario Key: {scenario.get('key', str(scenario)[:50])}")
+            print(f"  Scenario Details: {scenario}")
             result = local_cfr.play_enhanced_scenario(scenario)
+            print(f"  Result: {result}")
             local_results.append(result)
+            # (progress update every 500 iterations)
             
             # Progress update every 500 iterations
             if (iteration + 1) % 500 == 0:
