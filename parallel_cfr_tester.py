@@ -36,16 +36,15 @@ class ParallelCFRTrainer:
         print(f"   📊 Scenarios: {len(self.scenarios):,}")
         print(f"   🎮 Ready for high-performance training!")
 
-    def worker_train_batch(self, worker_id, scenarios_batch, iterations_per_worker, shared_queue):
+        def worker_train_batch(self, worker_id, scenarios_batch, iterations_per_worker, shared_queue):
         """
         Worker function that trains on a batch of scenarios
         Each worker runs independently to maximize CPU utilization
         """
         print(f"Worker {worker_id}: Starting {iterations_per_worker:,} iterations")
         
-        # Create local CFR trainer for this worker
-        local_cfr = EnhancedCFRTrainer(n_scenarios=1)  # Don't regenerate scenarios
-        local_cfr.scenarios = scenarios_batch
+        # Create local CFR trainer for this worker with batch scenarios
+        local_cfr = EnhancedCFRTrainer(scenarios=scenarios_batch)
         
         # Track local results
         local_results = []
@@ -78,7 +77,6 @@ class ParallelCFRTrainer:
         
         shared_queue.put(worker_summary)
         print(f"Worker {worker_id}: Completed {iterations_per_worker:,} iterations")
-
     def parallel_train(self, total_iterations=50000, checkpoint_every=10000):
         """
         Main parallel training function
