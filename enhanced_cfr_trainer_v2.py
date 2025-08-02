@@ -17,7 +17,6 @@ class EnhancedCFRTrainer:
     Enhanced CFR with tournament survival, stack awareness, and bet sizing
     """
     
-    class EnhancedCFRTrainer:
     def __init__(self, scenarios=None, n_scenarios=1000):
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
@@ -33,13 +32,13 @@ class EnhancedCFRTrainer:
         # Generate enhanced scenarios, or use provided ones
         if scenarios is not None:
             self.scenarios = scenarios
-            print(f"🚀 Initializing Enhanced CFR with {len(scenarios)} scenarios (from batch)...")
+            print(f"🚀 Using provided {len(scenarios)} scenarios...")
         else:
             self.scenarios = generate_enhanced_scenarios(n_scenarios)
-            print(f"🚀 Initializing Enhanced CFR with {n_scenarios} scenarios...")
+            print(f"🚀 Generated {n_scenarios} scenarios...")
+            
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
-        print(f"🧠 Features: Stack survival, bet sizing, tournament logic")
 
     def get_strategy(self, scenario_key, available_actions):
         """Get strategy using regret matching for available actions only"""
@@ -298,113 +297,5 @@ class EnhancedCFRTrainer:
                 f"{scenario['stack_category']}_{scenario['bet_size_category']}_"
                 f"{scenario['tournament_stage']}")
 
-    def train(self, iterations=10000, checkpoint_every=2000):
-        """Enhanced CFR training with tournament tracking"""
-        print(f"🚀 Starting Enhanced CFR Training for {iterations:,} iterations")
-        print(f"🏆 Features: Tournament survival, stack awareness, bet sizing")
-        print("=" * 80)
-        
-        start_time = time.time()
-        
-        for iteration in range(iterations):
-            # Select scenario
-            scenario = random.choice(self.scenarios)
-            
-            # Play and learn
-            result = self.play_enhanced_scenario(scenario)
-            
-            # Track results
-            self.scenario_counter[result['scenario_key']] += 1
-            self.iterations += 1
-            
-            # Track tournament metrics
-            if result['busted']:
-                self.tournament_results.append('busted')
-            else:
-                self.tournament_results.append('survived')
-            
-            # Progress updates
-            if (iteration + 1) % checkpoint_every == 0:
-                self.report_enhanced_progress(iteration + 1, start_time)
-                
-        elapsed = time.time() - start_time
-        print(f"\n🏆 Enhanced CFR Training Complete!")
-        print(f"⏱️  Time: {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
-        print(f"🎮 Games played: {self.iterations:,}")
-        print(f"📊 Unique scenarios trained: {len(self.scenario_counter)}")
-        
-        # Tournament survival analysis
-        self.analyze_tournament_performance()
-
-    def report_enhanced_progress(self, iteration, start_time):
-        """Enhanced progress reporting with tournament metrics"""
-        elapsed = time.time() - start_time
-        rate = iteration / elapsed if elapsed > 0 else 0
-        
-        # Recent performance metrics
-        recent_results = self.tournament_results[-1000:] if len(self.tournament_results) >= 1000 else self.tournament_results
-        if recent_results:
-            survival_rate = len([r for r in recent_results if r == 'survived']) / len(recent_results)
-            bust_rate = 1 - survival_rate
-        else:
-            survival_rate = 0
-            bust_rate = 0
-        
-        print(f"Iter {iteration:6,d}: {rate:6.1f} games/sec, "
-              f"Survival: {survival_rate:.1%}, Bust rate: {bust_rate:.1%}")
-
-    def analyze_tournament_performance(self):
-        """Analyze tournament survival and performance"""
-        print(f"\n🏆 TOURNAMENT PERFORMANCE ANALYSIS")
-        print("=" * 60)
-        
-        if self.tournament_results:
-            total_games = len(self.tournament_results)
-            survived = len([r for r in self.tournament_results if r == 'survived'])
-            busted = total_games - survived
-            
-            print(f"Total games played: {total_games:,}")
-            print(f"Survived: {survived:,} ({survived/total_games:.1%})")
-            print(f"Busted: {busted:,} ({busted/total_games:.1%})")
-
-def run_enhanced_cfr_training():
-    """Run enhanced CFR training session"""
-    print("🏆 ENHANCED CFR TRAINING - Tournament Survival & Stack Awareness")
-    print("=" * 70)
-    
-    # Initialize enhanced CFR
-    cfr = EnhancedCFRTrainer(n_scenarios=500)
-    
-    # Run training
-    cfr.train(iterations=10000, checkpoint_every=2000)
-    
-    # Analyze results
-    cfr.analyze_tournament_performance()
-    
-    print(f"\n📊 ENHANCED TRAINING SUMMARY:")
-    print(f"Games played: {cfr.iterations:,}")
-    print(f"Enhanced features: Stack awareness, tournament survival, bet sizing")
-    
-    return cfr
-
-def quick_enhanced_test():
-    """Quick test of enhanced CFR"""
-    print("⚡ QUICK ENHANCED CFR TEST")
-    print("=" * 40)
-    
-    cfr = EnhancedCFRTrainer(n_scenarios=100)
-    cfr.train(iterations=2000, checkpoint_every=500)
-    cfr.analyze_tournament_performance()
-    
-    print(f"\n✅ Enhanced test complete")
-    return cfr
-
 if __name__ == "__main__":
-    # Run quick enhanced test
-    cfr_trainer = quick_enhanced_test()
-    
-    print(f"\n💡 Enhanced CFR Features:")
-    print(f"1. ✅ Stack-aware action selection (6 action types)")
-    print(f"2. 🏆 Tournament survival mechanics (bust penalties)")
-    print(f"3. 💰 Bet sizing categorization (small/large calls/raises)")
-    print(f"4. 🎯 Context-aware learning (stack + tournament stage)")
+    print("Enhanced CFR Trainer v2 - Ready for training!")
