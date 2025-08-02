@@ -137,8 +137,8 @@ def generate_flexible_board(hole_cards, target_pair_type, target_draw_category):
                 deck.cards.remove(c)
         
         # Simple approach: generate random board and see if it's reasonable
-        if len(deck.cards) >= 5:
-            board = deck.draw(5)
+        if len(deck.cards) >= 3:
+            board = deck.draw(3)
             return board
         else:
             return None
