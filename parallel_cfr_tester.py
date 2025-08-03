@@ -56,6 +56,11 @@ class ParallelCFRTrainer:
             print(f"  Scenario Key: {scenario.get('key', str(scenario)[:50])}")
             print(f"  Scenario Details: {scenario}")
             result = local_cfr.play_enhanced_scenario(scenario)
+            
+            # Manually track scenario counts since the base class doesn't increment
+            scenario_key = result['scenario_key']
+            local_cfr.scenario_counter[scenario_key] += 1
+            
             print(f"  Result: {result}")
             local_results.append(result)
             # (progress update every 500 iterations)
@@ -233,7 +238,7 @@ class ParallelCFRTrainer:
         
         results = []
         for scenario_key, visit_count in self.combined_scenario_counter.items():
-            if visit_count >= 5:
+            if visit_count >= 2:  # Lowered threshold for lightweight testing
                 
                 # Get strategy from combined data
                 strategy_data = self.combined_strategy_sum[scenario_key]
@@ -347,11 +352,28 @@ if __name__ == "__main__":
     cpu_cores = mp.cpu_count()
     print(f"💪 Utilizing all {cpu_cores} CPU cores for maximum performance!")
     
-    parallel_cfr = ParallelCFRTrainer(n_scenarios=1000, n_workers=cpu_cores)
-    parallel_cfr.parallel_train(total_iterations=20000)
+    parallel_cfr = ParallelCFRTrainer(n_scenarios=100, n_workers=cpu_cores)
+    parallel_cfr.parallel_train(total_iterations=500)
     parallel_cfr.analyze_parallel_results()
     results_df = parallel_cfr.export_parallel_results('max_performance_cfr.csv')
     
     print(f"\n🎯 CPU UTILIZATION MAXIMIZED!")
     print(f"   🖥️  All {cpu_cores} cores working at 100%")
     print(f"   ⚡ {len(results_df)} strategies learned at maximum speed")
+    
+    # Display the first few rows of exported results for verification
+    print(f"\n📊 EXPORTED RESULTS PREVIEW:")
+    print("=" * 60)
+    if len(results_df) > 0:
+        print(f"📋 Showing first 5 rows out of {len(results_df)} total strategies:")
+        print(results_df.head().to_string(index=False))
+        print(f"\n📈 Quick Strategy Summary:")
+        if 'primary_action' in results_df.columns:
+            action_counts = results_df['primary_action'].value_counts()
+            for action, count in action_counts.items():
+                print(f"   {action}: {count} scenarios ({count/len(results_df)*100:.1f}%)")
+        print(f"\n💾 Full results saved to: max_performance_cfr.csv")
+    else:
+        print("⚠️  No results to display - all scenarios need more training iterations")
+        print("💡 For quick testing, each scenario needs at least 2 visits to be exported")
+        print("💡 Try increasing iterations or reducing scenarios for better coverage")
