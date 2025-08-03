@@ -389,6 +389,64 @@ class PreflopCFR:
                     best_action = ["FOLD", "CALL", "RAISE"][np.argmax(strategy)]
                     print(f"{group:24s} {strategy[0]:5.1%}   {strategy[1]:5.1%}   {strategy[2]:5.1%}   {best_action}")
 
+    def output_all_learned_strategies(self):
+        """Output all scenarios encountered during training with their learned action probabilities"""
+        print(f"\n🎯 ALL LEARNED STRATEGIES (Training Verification)")
+        print("=" * 90)
+        print(f"Total scenarios with training data: {len([s for s in self.all_preflop_scenarios if self.info_set_counter[s] > 0])}")
+        print(f"Total visits across all scenarios: {sum(self.info_set_counter.values())}")
+        print("")
+        
+        # Group scenarios by hand group for better readability
+        scenarios_by_group = {}
+        for scenario in self.all_preflop_scenarios:
+            if self.info_set_counter[scenario] > 0:  # Only show scenarios that were actually trained
+                group = scenario.split('|')[0]
+                if group not in scenarios_by_group:
+                    scenarios_by_group[group] = []
+                scenarios_by_group[group].append(scenario)
+        
+        # Output all learned strategies organized by hand group
+        for group in sorted(scenarios_by_group.keys()):
+            print(f"\n📋 Hand Group: {group}")
+            print("-" * 80)
+            print("Scenario                                 Visits  Fold%   Call%   Raise%  Best Action")
+            print("-" * 80)
+            
+            scenarios = sorted(scenarios_by_group[group])
+            for scenario in scenarios:
+                visits = self.info_set_counter[scenario]
+                if visits > 0 and scenario in self.strategy_sum:
+                    strategy = self.get_average_strategy(scenario)
+                    best_action = ["FOLD", "CALL", "RAISE"][np.argmax(strategy)]
+                    scenario_display = scenario.replace('|', ' | ')
+                    print(f"{scenario_display:40s} {visits:6d}  {strategy[0]:5.1%}   {strategy[1]:5.1%}   {strategy[2]:5.1%}   {best_action}")
+        
+        print(f"\n📊 SUMMARY OF LEARNING:")
+        print("-" * 50)
+        trained_scenarios = [s for s in self.all_preflop_scenarios if self.info_set_counter[s] > 0]
+        print(f"Scenarios encountered: {len(trained_scenarios)}/{len(self.all_preflop_scenarios)}")
+        
+        # Show distribution of actions learned
+        fold_count = call_count = raise_count = 0
+        for scenario in trained_scenarios:
+            if scenario in self.strategy_sum:
+                strategy = self.get_average_strategy(scenario)
+                best_action_idx = np.argmax(strategy)
+                if best_action_idx == 0:
+                    fold_count += 1
+                elif best_action_idx == 1:
+                    call_count += 1
+                else:
+                    raise_count += 1
+        
+        total = fold_count + call_count + raise_count
+        if total > 0:
+            print(f"Preferred actions learned:")
+            print(f"  FOLD:  {fold_count:3d} scenarios ({fold_count/total:5.1%})")
+            print(f"  CALL:  {call_count:3d} scenarios ({call_count/total:5.1%})")
+            print(f"  RAISE: {raise_count:3d} scenarios ({raise_count/total:5.1%})")
+
     def test_hand_lookup(self, test_hands=None):
         """Test strategy lookup for specific hands"""
         if test_hands is None:
@@ -424,10 +482,13 @@ def run_preflop_training():
     cfr = PreflopCFR()
     
     # Train with equal distribution
-    cfr.train_equal_distribution(total_iterations=300000, min_visits_per_scenario=300)
+    cfr.train_equal_distribution(total_iterations=100, min_visits_per_scenario=1)
     
     # Analyze results
     cfr.analyze_results()
+    
+    # Output all learned strategies for verification
+    cfr.output_all_learned_strategies()
     
     # Test specific hands
     cfr.test_hand_lookup()

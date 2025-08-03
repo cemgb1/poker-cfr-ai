@@ -257,7 +257,7 @@ class TrueCFRTrainer:
         category_strategies = defaultdict(list)
         
         for scenario_key in self.scenario_counter:
-            if self.scenario_counter[scenario_key] >= 10:  # Only well-trained scenarios
+            if self.scenario_counter[scenario_key] >= 1:  # Show all scenarios encountered
                 hand_category = scenario_key.split('_')[0]
                 avg_strategy = self.get_average_strategy(scenario_key)
                 category_strategies[hand_category].append({
@@ -280,6 +280,59 @@ class TrueCFRTrainer:
                 count = len(scenarios)
                 
                 print(f"{category:20s}  {avg_fold:.2f}  {avg_call:.2f}  {avg_raise:.2f}    {count:3d}")
+
+    def output_all_learned_strategies(self):
+        """Output all scenarios encountered during training with their learned action probabilities"""
+        print(f"\n🎯 ALL LEARNED STRATEGIES (Training Verification)")
+        print("=" * 90)
+        print(f"Total scenarios with training data: {len(self.scenario_counter)}")
+        print(f"Total visits across all scenarios: {sum(self.scenario_counter.values())}")
+        print("")
+        
+        # Sort scenarios by hand category for better readability
+        sorted_scenarios = sorted(self.scenario_counter.items(), 
+                                 key=lambda x: (x[0].split('_')[0], x[1]), reverse=True)
+        
+        print("All Scenarios Encountered:")
+        print("-" * 80)
+        print("Scenario                                 Visits  Fold%   Call%   Raise%  Best Action")
+        print("-" * 80)
+        
+        current_category = None
+        for scenario_key, visits in sorted_scenarios:
+            category = scenario_key.split('_')[0]
+            if category != current_category:
+                current_category = category
+                print(f"\n📋 Hand Category: {category}")
+                print("-" * 80)
+            
+            avg_strategy = self.get_average_strategy(scenario_key)
+            best_action = ["FOLD", "CALL", "RAISE"][np.argmax(avg_strategy)]
+            scenario_display = scenario_key.replace('_', ' | ')
+            print(f"{scenario_display:40s} {visits:6d}  {avg_strategy[0]:5.1%}   {avg_strategy[1]:5.1%}   {avg_strategy[2]:5.1%}   {best_action}")
+        
+        print(f"\n📊 SUMMARY OF LEARNING:")
+        print("-" * 50)
+        print(f"Scenarios encountered: {len(self.scenario_counter)}")
+        
+        # Show distribution of actions learned
+        fold_count = call_count = raise_count = 0
+        for scenario_key in self.scenario_counter:
+            avg_strategy = self.get_average_strategy(scenario_key)
+            best_action_idx = np.argmax(avg_strategy)
+            if best_action_idx == 0:
+                fold_count += 1
+            elif best_action_idx == 1:
+                call_count += 1
+            else:
+                raise_count += 1
+        
+        total = fold_count + call_count + raise_count
+        if total > 0:
+            print(f"Preferred actions learned:")
+            print(f"  FOLD:  {fold_count:3d} scenarios ({fold_count/total:5.1%})")
+            print(f"  CALL:  {call_count:3d} scenarios ({call_count/total:5.1%})")
+            print(f"  RAISE: {raise_count:3d} scenarios ({raise_count/total:5.1%})")
 
     def export_strategies_csv(self, filename='cfr_learned_strategies.csv'):
         """Export learned strategies to CSV"""
@@ -356,10 +409,13 @@ def run_cfr_training():
     cfr = TrueCFRTrainer(n_scenarios=500)
     
     # Run training
-    cfr.train(iterations=10000, checkpoint_every=2000)
+    cfr.train(iterations=100, checkpoint_every=50)
     
     # Analyze results
     cfr.analyze_learned_strategies()
+    
+    # Output all learned strategies for verification
+    cfr.output_all_learned_strategies()
     
     # Export strategies
     strategies_df = cfr.export_strategies_csv()
@@ -381,8 +437,9 @@ def quick_cfr_test():
     print("=" * 30)
     
     cfr = TrueCFRTrainer(n_scenarios=100)
-    cfr.train(iterations=2000, checkpoint_every=500)
+    cfr.train(iterations=100, checkpoint_every=50)
     cfr.analyze_learned_strategies()
+    cfr.output_all_learned_strategies()
     strategies_df = cfr.export_strategies_csv('quick_cfr_test.csv')
     
     print(f"\n✅ Quick test complete: {len(strategies_df)} strategies learned")
@@ -393,8 +450,8 @@ if __name__ == "__main__":
     cfr_trainer = quick_cfr_test()
     
     print(f"\n💡 Next Steps:")
-    print(f"1. ✅ Run quick_cfr_test() - 2K iterations, 2 minutes")
-    print(f"2. 🚀 Run run_cfr_training() - 10K iterations, full analysis")
+    print(f"1. ✅ Run quick_cfr_test() - 100 iterations, 1 minute")
+    print(f"2. 🚀 Run run_cfr_training() - 100 iterations, full analysis")
     print(f"3. 🏭 Scale up to 100K+ iterations for production model")
     print(f"\n🎯 Key Features:")
     print(f"   • True CFR with regret minimization")
