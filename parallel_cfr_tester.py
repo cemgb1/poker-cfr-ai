@@ -36,7 +36,7 @@ class ParallelCFRTrainer:
         print(f"   📊 Scenarios: {len(self.scenarios):,}")
         print(f"   🎮 Ready for high-performance training!")
 
-        def worker_train_batch(self, worker_id, scenarios_batch, iterations_per_worker, shared_queue):
+    def worker_train_batch(self, worker_id, scenarios_batch, iterations_per_worker, shared_queue):
         """
         Worker function that trains on a batch of scenarios
         Each worker runs independently to maximize CPU utilization
