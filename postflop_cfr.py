@@ -140,7 +140,7 @@ class PostflopCFR:
         
         return scenarios
 
-    def train_equal_distribution(self, total_iterations=800000, min_visits_per_scenario=200):
+    def train_equal_distribution(self, total_iterations=100, min_visits_per_scenario=1):
         """Train postflop with guaranteed equal distribution"""
         print(f"🚀 Training Postflop CFR with Equal Distribution")
         print(f"Target: {min_visits_per_scenario} visits per scenario")
@@ -594,7 +594,7 @@ def run_postflop_training(preflop_solver=None):
     cfr = PostflopCFR(preflop_solver)
     
     # Train with equal distribution
-    cfr.train_equal_distribution(total_iterations=500000, min_visits_per_scenario=150)
+    cfr.train_equal_distribution(total_iterations=100, min_visits_per_scenario=1)
     
     # Analyze results
     cfr.analyze_results()

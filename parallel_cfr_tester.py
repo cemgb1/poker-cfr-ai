@@ -79,7 +79,7 @@ class ParallelCFRTrainer:
         
         shared_queue.put(worker_summary)
         print(f"Worker {worker_id}: Completed {iterations_per_worker:,} iterations")
-    def parallel_train(self, total_iterations=50000, checkpoint_every=10000):
+    def parallel_train(self, total_iterations=100, checkpoint_every=50):
         """
         Main parallel training function
         Distributes work across all CPU cores
@@ -291,7 +291,7 @@ def run_parallel_cfr_training():
     parallel_cfr = ParallelCFRTrainer(n_scenarios=2000, n_workers=cpu_count)
     
     # Run high-intensity training
-    parallel_cfr.parallel_train(total_iterations=100000, checkpoint_every=20000)
+    parallel_cfr.parallel_train(total_iterations=100, checkpoint_every=50)
     
     # Analyze results
     parallel_cfr.analyze_parallel_results()
@@ -317,14 +317,14 @@ def benchmark_parallel_performance():
     print("🔄 Testing single-core performance...")
     single_start = time.time()
     single_cfr = ParallelCFRTrainer(n_scenarios=500, n_workers=1)
-    single_cfr.parallel_train(total_iterations=5000)
+    single_cfr.parallel_train(total_iterations=100)
     single_time = time.time() - single_start
     
     # Multi-core benchmark
     print("🚀 Testing multi-core performance...")
     multi_start = time.time()
     multi_cfr = ParallelCFRTrainer(n_scenarios=500, n_workers=mp.cpu_count())
-    multi_cfr.parallel_train(total_iterations=5000)
+    multi_cfr.parallel_train(total_iterations=100)
     multi_time = time.time() - multi_start
     
     # Performance comparison
@@ -347,7 +347,7 @@ if __name__ == "__main__":
     print(f"💪 Utilizing all {cpu_cores} CPU cores for maximum performance!")
     
     parallel_cfr = ParallelCFRTrainer(n_scenarios=1000, n_workers=cpu_cores)
-    parallel_cfr.parallel_train(total_iterations=20000)
+    parallel_cfr.parallel_train(total_iterations=100)
     parallel_cfr.analyze_parallel_results()
     results_df = parallel_cfr.export_parallel_results('max_performance_cfr.csv')
     
