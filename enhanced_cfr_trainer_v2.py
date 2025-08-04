@@ -28,6 +28,11 @@ class EnhancedCFRTrainer:
         self.stack_survival_rate = []
         self.tournament_results = []
         self.equity_by_stack = defaultdict(list)
+        
+        # Performance metrics tracking
+        self.performance_metrics = []
+        self.start_time = None
+        self.last_iteration_time = None
 
         # Generate enhanced scenarios, or use provided ones
         if scenarios is not None:
@@ -414,14 +419,122 @@ class EnhancedCFRTrainer:
             print("❌ No strategy data to export")
             return None
 
+    def start_performance_tracking(self):
+        """Initialize performance tracking for the training session"""
+        self.start_time = time.time()
+        self.last_iteration_time = self.start_time
+        self.performance_metrics = []
+        print("📊 Performance tracking started")
+
+    def calculate_regret_statistics(self):
+        """Calculate current regret statistics efficiently"""
+        if not self.regret_sum:
+            return {'avg_regret': 0.0, 'max_regret': 0.0}
+        
+        all_regrets = []
+        max_regret = 0.0
+        
+        for scenario_regrets in self.regret_sum.values():
+            for regret_value in scenario_regrets.values():
+                all_regrets.append(abs(regret_value))
+                max_regret = max(max_regret, abs(regret_value))
+        
+        avg_regret = np.mean(all_regrets) if all_regrets else 0.0
+        return {'avg_regret': avg_regret, 'max_regret': max_regret}
+
+    def get_scenario_coverage_histogram(self):
+        """Create a histogram of scenario visit counts"""
+        if not self.scenario_counter:
+            return {}
+        
+        visit_counts = list(self.scenario_counter.values())
+        # Create bins for histogram: 0-10, 11-25, 26-50, 51-100, 100+
+        bins = [0, 10, 25, 50, 100, float('inf')]
+        bin_labels = ['0-10', '11-25', '26-50', '51-100', '100+']
+        
+        histogram = {}
+        for i, label in enumerate(bin_labels):
+            count = sum(1 for visits in visit_counts 
+                       if bins[i] < visits <= bins[i+1])
+            histogram[label] = count
+        
+        return histogram
+
+    def record_iteration_metrics(self, iteration):
+        """Record performance metrics for this iteration"""
+        current_time = time.time()
+        
+        # Calculate timing metrics
+        total_elapsed = current_time - self.start_time
+        time_per_iteration = current_time - self.last_iteration_time
+        
+        # Calculate regret statistics (efficiently)
+        regret_stats = self.calculate_regret_statistics()
+        
+        # Get scenario coverage
+        unique_scenarios = len(self.scenario_counter)
+        coverage_histogram = self.get_scenario_coverage_histogram()
+        
+        # Record metrics
+        metrics = {
+            'iteration': iteration,
+            'time_per_iteration': time_per_iteration,
+            'total_elapsed_time': total_elapsed,
+            'average_regret': regret_stats['avg_regret'],
+            'max_regret': regret_stats['max_regret'],
+            'unique_scenarios_visited': unique_scenarios,
+            'scenario_coverage_0_10': coverage_histogram.get('0-10', 0),
+            'scenario_coverage_11_25': coverage_histogram.get('11-25', 0),
+            'scenario_coverage_26_50': coverage_histogram.get('26-50', 0),
+            'scenario_coverage_51_100': coverage_histogram.get('51-100', 0),
+            'scenario_coverage_100_plus': coverage_histogram.get('100+', 0)
+        }
+        
+        self.performance_metrics.append(metrics)
+        self.last_iteration_time = current_time
+        
+        return metrics
+
+    def export_performance_metrics(self, filename="model_performance.csv"):
+        """Export performance metrics to CSV file"""
+        if not self.performance_metrics:
+            print("❌ No performance metrics to export")
+            return None
+        
+        import pandas as pd
+        
+        print(f"📊 Exporting performance metrics to {filename}...")
+        
+        df = pd.DataFrame(self.performance_metrics)
+        df.to_csv(filename, index=False)
+        
+        # Show summary
+        print(f"\n📈 PERFORMANCE METRICS SUMMARY:")
+        print(f"Total iterations tracked: {len(df)}")
+        print(f"Total training time: {df['total_elapsed_time'].iloc[-1]:.2f}s")
+        print(f"Average time per iteration: {df['time_per_iteration'].mean():.4f}s")
+        print(f"Final average regret: {df['average_regret'].iloc[-1]:.6f}")
+        print(f"Final max regret: {df['max_regret'].iloc[-1]:.6f}")
+        print(f"Unique scenarios visited: {df['unique_scenarios_visited'].iloc[-1]}")
+        
+        # Show convergence trend
+        if len(df) >= 10:
+            recent_avg_regret = df['average_regret'].tail(10).mean()
+            early_avg_regret = df['average_regret'].head(10).mean()
+            regret_change = (recent_avg_regret - early_avg_regret) / early_avg_regret * 100 if early_avg_regret > 0 else 0
+            print(f"Regret convergence: {regret_change:+.1f}% change from early to recent iterations")
+        
+        return df
+
 if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
     # Add a simple training function for testing
-    def run_enhanced_training(n_scenarios=100, n_iterations=1000):
-        """Run enhanced CFR training with expanded action set"""
-        print(f"🚀 Running Enhanced CFR Training")
+    def run_enhanced_training(n_scenarios=100, n_iterations=1000, metrics_interval=100):
+        """Run enhanced CFR training with expanded action set and performance tracking"""
+        print(f"🚀 Running Enhanced CFR Training with Performance Tracking")
         print(f"Scenarios: {n_scenarios}, Iterations: {n_iterations}")
+        print(f"Metrics interval: every {metrics_interval} iterations")
         print(f"Action set: FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH")
         print("=" * 70)
         
@@ -432,22 +545,34 @@ if __name__ == "__main__":
         # Initialize trainer
         trainer = EnhancedCFRTrainer(scenarios=scenarios)
         
-        # Train
-        print(f"\n🎯 Starting CFR training...")
+        # Start performance tracking
+        trainer.start_performance_tracking()
+        
+        # Train with performance tracking
+        print(f"\n🎯 Starting CFR training with performance metrics...")
         for iteration in range(n_iterations):
             # Pick random scenario for this iteration
             scenario = random.choice(scenarios)
             trainer.play_enhanced_scenario(scenario)
             trainer.scenario_counter[trainer.get_scenario_key(scenario)] += 1
             
-            if iteration % 200 == 0 and iteration > 0:
-                print(f"Iteration {iteration}: Trained {len(trainer.strategy_sum)} scenarios")
+            # Record metrics at regular intervals
+            if iteration % metrics_interval == 0:
+                metrics = trainer.record_iteration_metrics(iteration)
+                if iteration > 0:  # Skip first iteration for meaningful timing
+                    print(f"Iteration {iteration:4d}: {metrics['unique_scenarios_visited']:3d} scenarios, "
+                          f"avg_regret={metrics['average_regret']:.6f}, "
+                          f"time={metrics['time_per_iteration']:.4f}s")
+        
+        # Record final metrics
+        final_metrics = trainer.record_iteration_metrics(n_iterations - 1)
         
         print(f"✅ Training complete after {n_iterations} iterations")
         print(f"📊 Learned strategies for {len(trainer.strategy_sum)} scenarios")
         
-        # Export to CSV
+        # Export both strategy results and performance metrics
         trainer.export_strategies_to_csv("enhanced_cfr_results.csv")
+        trainer.export_performance_metrics("model_performance.csv")
         
         return trainer
     

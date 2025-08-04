@@ -21,7 +21,8 @@ from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios, ACTIO
 import random
 import time
 
-def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_file="expanded_preflop_strategies.csv"):
+def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_file="expanded_preflop_strategies.csv", 
+                                  enable_performance_tracking=False, metrics_interval=200):
     """
     Run expanded preflop CFR training with the new 7-action abstraction.
     
@@ -29,6 +30,8 @@ def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_fil
         n_scenarios (int): Number of unique scenarios to generate
         n_iterations (int): Number of CFR training iterations  
         output_file (str): CSV filename for strategy export
+        enable_performance_tracking (bool): Whether to track and export performance metrics
+        metrics_interval (int): How often to record metrics (when performance tracking enabled)
     
     Returns:
         EnhancedCFRTrainer: Trained CFR model
@@ -40,6 +43,11 @@ def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_fil
     print(f"📊 Scenarios: {n_scenarios}")
     print(f"🔄 Training iterations: {n_iterations}")
     print(f"📁 Output file: {output_file}")
+    if enable_performance_tracking:
+        print(f"📊 Performance tracking: ENABLED (metrics every {metrics_interval} iterations)")
+        print(f"📁 Performance metrics file: model_performance.csv")
+    else:
+        print(f"📊 Performance tracking: DISABLED")
     print()
     
     # Generate diverse scenarios across all hand categories and situations
@@ -54,6 +62,10 @@ def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_fil
     print(f"\n🚀 Initializing CFR trainer...")
     trainer = EnhancedCFRTrainer(scenarios=scenarios)
     
+    # Start performance tracking if enabled
+    if enable_performance_tracking:
+        trainer.start_performance_tracking()
+    
     # Training loop with progress reporting
     print(f"\n🎯 Starting CFR training...")
     start_time = time.time()
@@ -66,12 +78,30 @@ def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_fil
         scenario_key = trainer.get_scenario_key(scenario)
         trainer.scenario_counter[scenario_key] += 1
         
+        # Record performance metrics if enabled
+        if enable_performance_tracking and iteration % metrics_interval == 0:
+            metrics = trainer.record_iteration_metrics(iteration)
+            
         # Progress reporting
         if iteration % (n_iterations // 10) == 0 and iteration > 0:
             elapsed = time.time() - start_time
             scenarios_trained = len(trainer.strategy_sum)
-            print(f"  Iteration {iteration:4d}/{n_iterations}: {scenarios_trained:3d} scenarios trained "
-                  f"({elapsed:.1f}s elapsed)")
+            if enable_performance_tracking and iteration >= metrics_interval:
+                # Include metrics in progress report
+                latest_metrics = trainer.performance_metrics[-1] if trainer.performance_metrics else None
+                if latest_metrics:
+                    print(f"  Iteration {iteration:4d}/{n_iterations}: {scenarios_trained:3d} scenarios trained "
+                          f"({elapsed:.1f}s elapsed) - avg_regret={latest_metrics['average_regret']:.6f}")
+                else:
+                    print(f"  Iteration {iteration:4d}/{n_iterations}: {scenarios_trained:3d} scenarios trained "
+                          f"({elapsed:.1f}s elapsed)")
+            else:
+                print(f"  Iteration {iteration:4d}/{n_iterations}: {scenarios_trained:3d} scenarios trained "
+                      f"({elapsed:.1f}s elapsed)")
+    
+    # Record final metrics if performance tracking enabled
+    if enable_performance_tracking:
+        trainer.record_iteration_metrics(n_iterations - 1)
     
     elapsed = time.time() - start_time
     print(f"\n✅ Training complete! ({elapsed:.1f}s total)")
@@ -103,6 +133,14 @@ def run_expanded_preflop_training(n_scenarios=200, n_iterations=2000, output_fil
             print(f"  {row['example_hands']} ({row['position']}, {row['stack_depth']} stack): "
                   f"{row['best_action']} ({row['confidence']:.1%} confidence)")
     
+    # Export performance metrics if tracking was enabled
+    if enable_performance_tracking:
+        print(f"\n📁 Exporting performance metrics to model_performance.csv...")
+        perf_df = trainer.export_performance_metrics("model_performance.csv")
+        if perf_df is not None:
+            print(f"✅ Performance metrics exported successfully!")
+            print(f"   Use this file to analyze convergence and training dynamics")
+    
     return trainer
 
 def demonstrate_action_coverage():
@@ -133,11 +171,15 @@ if __name__ == "__main__":
     # Demonstrate action coverage
     demonstrate_action_coverage()
     
-    # Run training demonstration
+    # Run training demonstration (with performance tracking disabled by default)
+    print(f"\n" + "="*70)
+    print(f"Running demo WITHOUT performance tracking (default mode)...")
+    print(f"To enable performance tracking, set enable_performance_tracking=True")
     trainer = run_expanded_preflop_training(
         n_scenarios=100,  # Reasonable for demo
         n_iterations=1000, 
-        output_file="expanded_preflop_demo_results.csv"
+        output_file="expanded_preflop_demo_results.csv",
+        enable_performance_tracking=False  # Set to True to enable metrics tracking
     )
     
     print(f"\n🎉 Demo complete! Check 'expanded_preflop_demo_results.csv' for detailed results.")
@@ -149,3 +191,8 @@ if __name__ == "__main__":
     print(f"✅ Export includes scenario details: hand categories, position, stack depth, bet sizing")
     print(f"✅ Export includes best action as determined by the model")
     print(f"✅ Changes isolated to preflop trainer logic as requested")
+    print(f"\n🆕 NEW: Performance metrics tracking available!")
+    print(f"✅ Set enable_performance_tracking=True to create model_performance.csv")
+    print(f"✅ Tracks iteration metrics: regret, timing, scenario coverage")
+    print(f"✅ Use for analyzing convergence and learning dynamics")
+    print(f"✅ No impact on training speed when disabled")
