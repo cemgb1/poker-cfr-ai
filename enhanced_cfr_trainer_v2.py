@@ -108,10 +108,10 @@ class EnhancedCFRTrainer:
         }
 
     def calculate_enhanced_payoff(self, scenario, hero_action, villain_action, villain_cards):
-        """Calculate payoff with tournament survival considerations"""
+        """Calculate payoff with stack survival considerations (tournament_stage removed)"""
         hero_stack_before = scenario['hero_stack_bb']
         bet_amount = scenario['bet_to_call_bb']
-        tournament_stage = scenario['tournament_stage']
+        # tournament_stage removed - using stack-based logic instead
         
         # Determine bet amounts based on actions
         hero_bet = self.get_bet_amount(hero_action, hero_stack_before, bet_amount)
@@ -133,14 +133,13 @@ class EnhancedCFRTrainer:
         # Base payoff
         base_payoff = stack_change / hero_stack_before  # Normalize by stack size
         
-        # Tournament survival adjustments
-        tournament_payoff = self.apply_tournament_adjustments(
-            base_payoff, hero_stack_before, hero_stack_after, 
-            tournament_stage, busted
+        # Stack-based adjustments (replacing tournament-specific logic)
+        stack_payoff = self.apply_stack_adjustments(
+            base_payoff, hero_stack_before, hero_stack_after, busted
         )
         
         return {
-            'payoff': tournament_payoff,
+            'payoff': stack_payoff,
             'hero_stack_after': hero_stack_after,
             'busted': busted,
             'stack_change': stack_change
@@ -161,37 +160,36 @@ class EnhancedCFRTrainer:
         else:
             return current_bet
 
-    def apply_tournament_adjustments(self, base_payoff, stack_before, stack_after, 
-                                   tournament_stage, busted):
-        """Apply tournament-specific payoff adjustments"""
-        tournament_payoff = base_payoff
+    def apply_stack_adjustments(self, base_payoff, stack_before, stack_after, busted):
+        """Apply stack-based payoff adjustments (replacing tournament logic)"""
+        stack_payoff = base_payoff
         
-        # Massive penalty for busting
+        # Massive penalty for busting (severity based on stack size)
         if busted:
-            if tournament_stage == "bubble":
-                tournament_payoff = -10.0  # Extremely bad to bust on bubble
-            elif tournament_stage == "late":
-                tournament_payoff = -5.0   # Very bad to bust late
+            if stack_before <= 15:  # Short stack bust
+                stack_payoff = -8.0   # Very bad to bust when short
+            elif stack_before <= 30:  # Medium stack bust  
+                stack_payoff = -5.0   # Bad to bust with medium stack
             else:
-                tournament_payoff = -3.0   # Bad to bust anytime
+                stack_payoff = -3.0   # Standard bust penalty
         
         # Survival bonus for short stacks
         if stack_before <= 15 and stack_after > stack_before:
             survival_bonus = 2.0 * (stack_after - stack_before) / stack_before
-            tournament_payoff += survival_bonus
+            stack_payoff += survival_bonus
         
-        # Stack preservation bonus in late stages
-        if tournament_stage in ["late", "bubble"] and not busted:
+        # Stack preservation bonus for short stacks
+        if stack_before <= 30 and not busted:
             if stack_after >= stack_before * 0.8:  # Didn't lose much
                 preservation_bonus = 0.5
-                tournament_payoff += preservation_bonus
+                stack_payoff += preservation_bonus
         
-        # Chip accumulation bonus in early stages
-        if tournament_stage == "early" and stack_after > stack_before * 1.5:
+        # Chip accumulation bonus for deeper stacks
+        if stack_before > 50 and stack_after > stack_before * 1.5:
             accumulation_bonus = 1.0
-            tournament_payoff += accumulation_bonus
+            stack_payoff += accumulation_bonus
         
-        return tournament_payoff
+        return stack_payoff
 
     def generate_villain_hand(self, hero_cards):
         """Generate random villain hand"""
@@ -202,25 +200,23 @@ class EnhancedCFRTrainer:
         return deck.draw(2)
 
     def get_enhanced_villain_action(self, villain_cards, scenario):
-        """Enhanced villain action based on stack and tournament context"""
+        """Enhanced villain action based on stack context (tournament_stage removed)"""
         try:
             villain_equity = self.estimate_villain_equity(villain_cards)
             villain_stack = scenario['villain_stack_bb']
-            tournament_stage = scenario['tournament_stage']
+            # tournament_stage removed - using stack-based logic instead
             
-            # Adjust strategy based on tournament stage and stack
-            if tournament_stage == "bubble" and villain_stack <= 20:
-                # Very tight on bubble with short stack
-                if villain_equity > 0.7:
+            # Adjust strategy based on stack size
+            if villain_stack <= 15:  # Short stack - push/fold
+                if villain_equity > 0.45:
+                    return "all_in"
+                else:
+                    return "fold"
+            elif villain_stack <= 30:  # Medium short stack - tighter play
+                if villain_equity > 0.6:
                     return "all_in"
                 elif villain_equity > 0.5:
                     return "call_small"
-                else:
-                    return "fold"
-            
-            elif villain_stack <= 15:  # Short stack - push/fold
-                if villain_equity > 0.45:
-                    return "all_in"
                 else:
                     return "fold"
             
@@ -300,10 +296,9 @@ class EnhancedCFRTrainer:
             return actual_payoff
 
     def get_scenario_key(self, scenario):
-        """Enhanced scenario key with stack and tournament context"""
+        """Enhanced scenario key with stack context (tournament_stage removed)"""
         return (f"{scenario['hand_category']}_{scenario['hero_position']}_"
-                f"{scenario['stack_category']}_{scenario['bet_size_category']}_"
-                f"{scenario['tournament_stage']}")
+                f"{scenario['stack_category']}_{scenario['bet_size_category']}")
 
     def export_strategies_to_csv(self, filename="enhanced_cfr_strategies.csv"):
         """
@@ -318,7 +313,6 @@ class EnhancedCFRTrainer:
         - position: Hero's position (BTN/BB)
         - stack_depth: Stack size category (ultra_short, short, medium, deep, very_deep)
         - bet_size_category: Size of bet to call (tiny, small, medium, large, no_bet)
-        - tournament_stage: Stage of tournament (early, middle, late, bubble)
         - training_games: Number of training iterations for this scenario
         - best_action: Recommended action (FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH)
         - confidence: Probability of best action (0-1)
@@ -335,14 +329,13 @@ class EnhancedCFRTrainer:
         for scenario_key, strategy_counts in self.strategy_sum.items():
             if sum(strategy_counts.values()) > 0:  # Only export scenarios with data
                 
-                # Parse scenario key
+                # Parse scenario key (tournament_stage removed)
                 parts = scenario_key.split("_")
-                if len(parts) >= 5:
+                if len(parts) >= 4:
                     hand_category = parts[0]
                     position = parts[1] 
                     stack_category = parts[2]
                     bet_size_category = parts[3]
-                    tournament_stage = parts[4]
                 else:
                     continue  # Skip malformed keys
                 
@@ -372,7 +365,7 @@ class EnhancedCFRTrainer:
                 # Get training count for this scenario
                 training_games = self.scenario_counter.get(scenario_key, 0)
                 
-                # Build export row
+                # Build export row (tournament_stage removed)
                 row = {
                     'scenario_key': scenario_key,
                     'hand_category': hand_category,
@@ -380,7 +373,6 @@ class EnhancedCFRTrainer:
                     'position': position,
                     'stack_depth': stack_category,
                     'bet_size_category': bet_size_category,
-                    'tournament_stage': tournament_stage,
                     'training_games': training_games,
                     'best_action': best_action.upper(),
                     'confidence': round(best_action_confidence, 3),
