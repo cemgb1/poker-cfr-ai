@@ -1,0 +1,6 @@
+scenario_key,hand_category,position,stack_depth,bet_size_category,tournament_stage,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
+premium_pairs_BTN_deep_tiny_bubble,premium,pairs,BTN,deep,tiny,3,RAISE_HIGH,0.531,0.067,0.067,0.0,0.0,0.097,0.239,0.531
+medium_pairs_BTN_medium_no_bet_middle,medium,pairs,BTN,medium,no,4,FOLD,0.25,0.25,0.0,0.0,0.0,0.25,0.25,0.25
+medium_aces_BTN_very_deep_no_bet_bubble,medium,aces,BTN,very,deep,1,FOLD,0.25,0.25,0.0,0.0,0.0,0.25,0.25,0.25
+small_pairs_BTN_deep_no_bet_bubble,small,pairs,BTN,deep,no,1,FOLD,0.25,0.25,0.0,0.0,0.0,0.25,0.25,0.25
+premium_aces_BTN_medium_tiny_late,premium,aces,BTN,medium,tiny,1,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2

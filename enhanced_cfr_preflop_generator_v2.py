@@ -32,14 +32,15 @@ STACK_CATEGORIES = {
 # TOURNAMENT STAGES
 TOURNAMENT_STAGES = ["early", "middle", "late", "bubble"]
 
-# ENHANCED ACTION SET
+# ENHANCED ACTION SET - Updated to match specification
 ACTIONS = {
     "fold": 0,
-    "call_small": 1,    # Call ≤30% of stack
-    "call_large": 2,    # Call >30% of stack
-    "raise_small": 3,   # Raise 2-2.5x
-    "raise_large": 4,   # Raise 3-4x
-    "all_in": 5         # Shove entire stack
+    "call_small": 1,    # Call ≤15% of stack  
+    "call_mid": 2,      # Call 15-30% of stack
+    "call_high": 3,     # Call >30% of stack
+    "raise_small": 4,   # Raise 2-2.5x
+    "raise_mid": 5,     # Raise 2.5-3x  
+    "raise_high": 6     # Raise 3x+ or all-in
 }
 
 def generate_enhanced_scenarios(n_scenarios=1000):
@@ -193,26 +194,23 @@ def get_available_actions(stack_bb, bet_to_call):
     actions = ["fold"]
     
     if bet_to_call == 0:
-        # No bet to call - can check or bet
-        actions.extend(["check", "bet_small", "bet_large"])
-        if stack_bb <= 15:
-            actions.append("all_in")
+        # No bet to call - can only raise (no checking in this preflop model)
+        actions.extend(["raise_small", "raise_mid", "raise_high"])
     else:
-        # Bet to call - categorize call size
+        # Bet to call - categorize call size based on stack percentage
         bet_ratio = bet_to_call / stack_bb
         
-        if bet_ratio <= 0.3:
+        # Add appropriate call actions based on bet size
+        if bet_ratio <= 0.15:
             actions.append("call_small")
+        elif bet_ratio <= 0.30:
+            actions.append("call_mid") 
         else:
-            actions.append("call_large")
+            actions.append("call_high")
         
-        # Raise options based on stack
-        if stack_bb > bet_to_call + 5:  # Can afford raises
-            actions.extend(["raise_small", "raise_large"])
-        
-        # All-in option
-        if stack_bb <= 20 or bet_ratio > 0.5:
-            actions.append("all_in")
+        # Add raise options if stack allows
+        if stack_bb > bet_to_call + 3:  # Must have chips left for meaningful raise
+            actions.extend(["raise_small", "raise_mid", "raise_high"])
     
     return actions
 

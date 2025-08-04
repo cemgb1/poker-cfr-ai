@@ -276,18 +276,21 @@ class EnhancedCFRTrainer:
         """Estimate payoff if we had taken a different action"""
         actual_payoff = actual_result['payoff']
         
-        # Simple heuristic estimates
+        # Enhanced heuristic estimates for new action set
         if alternative_action == "fold":
             return -0.1  # Small loss from folding
-        elif alternative_action == "all_in":
-            if actual_result['busted']:
-                return -2.0  # Would have busted anyway
-            else:
-                return actual_payoff * 1.5  # Higher risk, higher reward
-        elif "call" in alternative_action:
-            return actual_payoff * 0.8  # More conservative
-        elif "raise" in alternative_action:
-            return actual_payoff * 1.2  # More aggressive
+        elif alternative_action == "call_small":
+            return actual_payoff * 0.7  # Conservative, small risk
+        elif alternative_action == "call_mid":
+            return actual_payoff * 0.8  # Moderate risk
+        elif alternative_action == "call_high":
+            return actual_payoff * 0.9  # Higher risk call
+        elif alternative_action == "raise_small":
+            return actual_payoff * 1.1  # Modest aggression
+        elif alternative_action == "raise_mid":
+            return actual_payoff * 1.2  # Standard aggression
+        elif alternative_action == "raise_high":
+            return actual_payoff * 1.4  # High aggression/risk
         else:
             return actual_payoff
 
@@ -297,5 +300,156 @@ class EnhancedCFRTrainer:
                 f"{scenario['stack_category']}_{scenario['bet_size_category']}_"
                 f"{scenario['tournament_stage']}")
 
+    def export_strategies_to_csv(self, filename="enhanced_cfr_strategies.csv"):
+        """
+        Export all learned strategies to CSV with comprehensive scenario details.
+        Includes probabilities for each action, scenario details (hole cards, position, 
+        stack depth, bet sizing info), and best action as determined by model.
+        
+        CSV columns include:
+        - scenario_key: Unique identifier for the scenario
+        - hand_category: Broad category of hole cards (premium_pairs, medium_aces, etc.)
+        - example_hands: Sample hands from this category  
+        - position: Hero's position (BTN/BB)
+        - stack_depth: Stack size category (ultra_short, short, medium, deep, very_deep)
+        - bet_size_category: Size of bet to call (tiny, small, medium, large, no_bet)
+        - tournament_stage: Stage of tournament (early, middle, late, bubble)
+        - training_games: Number of training iterations for this scenario
+        - best_action: Recommended action (FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH)
+        - confidence: Probability of best action (0-1)
+        - fold_prob through raise_high_prob: Probability of each action
+        """
+        import pandas as pd
+        from enhanced_cfr_preflop_generator_v2 import ACTIONS, PREFLOP_HAND_RANGES
+        
+        print(f"📊 Exporting strategies to {filename}...")
+        
+        # Collect all strategy data
+        export_data = []
+        
+        for scenario_key, strategy_counts in self.strategy_sum.items():
+            if sum(strategy_counts.values()) > 0:  # Only export scenarios with data
+                
+                # Parse scenario key
+                parts = scenario_key.split("_")
+                if len(parts) >= 5:
+                    hand_category = parts[0]
+                    position = parts[1] 
+                    stack_category = parts[2]
+                    bet_size_category = parts[3]
+                    tournament_stage = parts[4]
+                else:
+                    continue  # Skip malformed keys
+                
+                # Get example hands for this category
+                example_hands = ""
+                if hand_category in PREFLOP_HAND_RANGES:
+                    examples = PREFLOP_HAND_RANGES[hand_category][:3]  # First 3 examples
+                    example_hands = ", ".join(examples)
+                
+                # Calculate average strategy (normalized probabilities)
+                total_count = sum(strategy_counts.values())
+                action_probs = {}
+                
+                # Initialize all action probabilities to 0
+                for action_name in ACTIONS.keys():
+                    action_probs[f"{action_name}_prob"] = 0.0
+                
+                # Fill in actual probabilities
+                for action, count in strategy_counts.items():
+                    if action in ACTIONS:
+                        action_probs[f"{action}_prob"] = count / total_count
+                
+                # Determine best action
+                best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
+                best_action_confidence = max(action_probs.values())
+                
+                # Get training count for this scenario
+                training_games = self.scenario_counter.get(scenario_key, 0)
+                
+                # Build export row
+                row = {
+                    'scenario_key': scenario_key,
+                    'hand_category': hand_category,
+                    'example_hands': example_hands,
+                    'position': position,
+                    'stack_depth': stack_category,
+                    'bet_size_category': bet_size_category,
+                    'tournament_stage': tournament_stage,
+                    'training_games': training_games,
+                    'best_action': best_action.upper(),
+                    'confidence': round(best_action_confidence, 3),
+                    **{k: round(v, 3) for k, v in action_probs.items()}
+                }
+                
+                export_data.append(row)
+        
+        # Create DataFrame and export
+        if export_data:
+            df = pd.DataFrame(export_data)
+            
+            # Sort by confidence descending, then by training games
+            df = df.sort_values(['confidence', 'training_games'], ascending=[False, False])
+            
+            # Export to CSV
+            df.to_csv(filename, index=False)
+            
+            print(f"✅ Exported {len(export_data)} scenarios to {filename}")
+            print(f"📊 Columns: {list(df.columns)}")
+            
+            # Show summary stats
+            print(f"\n📈 EXPORT SUMMARY:")
+            print(f"Total scenarios: {len(export_data)}")
+            print(f"Avg training games per scenario: {df['training_games'].mean():.1f}")
+            print(f"Avg confidence: {df['confidence'].mean():.3f}")
+            
+            # Show action distribution
+            print(f"\nBest Action Distribution:")
+            action_dist = df['best_action'].value_counts()
+            for action, count in action_dist.items():
+                print(f"  {action}: {count} scenarios ({count/len(export_data)*100:.1f}%)")
+            
+            return df
+        else:
+            print("❌ No strategy data to export")
+            return None
+
 if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
+    
+    # Add a simple training function for testing
+    def run_enhanced_training(n_scenarios=100, n_iterations=1000):
+        """Run enhanced CFR training with expanded action set"""
+        print(f"🚀 Running Enhanced CFR Training")
+        print(f"Scenarios: {n_scenarios}, Iterations: {n_iterations}")
+        print(f"Action set: FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH")
+        print("=" * 70)
+        
+        # Generate scenarios
+        from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+        scenarios = generate_enhanced_scenarios(n_scenarios)
+        
+        # Initialize trainer
+        trainer = EnhancedCFRTrainer(scenarios=scenarios)
+        
+        # Train
+        print(f"\n🎯 Starting CFR training...")
+        for iteration in range(n_iterations):
+            # Pick random scenario for this iteration
+            scenario = random.choice(scenarios)
+            trainer.play_enhanced_scenario(scenario)
+            trainer.scenario_counter[trainer.get_scenario_key(scenario)] += 1
+            
+            if iteration % 200 == 0 and iteration > 0:
+                print(f"Iteration {iteration}: Trained {len(trainer.strategy_sum)} scenarios")
+        
+        print(f"✅ Training complete after {n_iterations} iterations")
+        print(f"📊 Learned strategies for {len(trainer.strategy_sum)} scenarios")
+        
+        # Export to CSV
+        trainer.export_strategies_to_csv("enhanced_cfr_results.csv")
+        
+        return trainer
+    
+    # Uncomment to run training:
+    # trainer = run_enhanced_training()
