@@ -1,0 +1,50 @@
+scenario_key,hand_category,example_hands,position,stack_depth,bet_size_category,tournament_stage,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
+medium_aces_BB_ultra_short_huge_late,medium,,aces,BB,ultra,short,19,CALL_HIGH,0.895,0.105,0.0,0.0,0.895,0.0,0.0,0.0
+offsuit_broadway_BTN_ultra_short_huge_bubble,offsuit,,broadway,BTN,ultra,short,11,CALL_HIGH,0.818,0.182,0.0,0.0,0.818,0.0,0.0,0.0
+premium_pairs_BTN_ultra_short_huge_late,premium,,pairs,BTN,ultra,short,10,CALL_HIGH,0.8,0.2,0.0,0.0,0.8,0.0,0.0,0.0
+suited_gappers_BB_very_deep_tiny_early,suited,,gappers,BB,very,deep,11,CALL_SMALL,0.794,0.036,0.794,0.0,0.0,0.039,0.042,0.088
+trash_BB_short_huge_late,trash,"72o, 83o, 94o",BB,short,huge,late,11,FOLD,0.729,0.729,0.0,0.0,0.271,0.0,0.0,0.0
+small_pairs_BTN_very_deep_tiny_middle,small,,pairs,BTN,very,deep,8,RAISE_HIGH,0.728,0.025,0.025,0.0,0.0,0.071,0.151,0.728
+suited_broadway_BB_very_deep_tiny_middle,suited,,broadway,BB,very,deep,8,CALL_SMALL,0.72,0.05,0.72,0.0,0.0,0.078,0.067,0.085
+weak_aces_BB_deep_tiny_early,weak,,aces,BB,deep,tiny,5,CALL_SMALL,0.642,0.238,0.642,0.0,0.0,0.04,0.04,0.04
+premium_aces_BB_ultra_short_huge_late,premium,,aces,BB,ultra,short,12,CALL_HIGH,0.639,0.361,0.0,0.0,0.639,0.0,0.0,0.0
+medium_pairs_BB_medium_tiny_early,medium,,pairs,BB,medium,tiny,12,RAISE_HIGH,0.63,0.017,0.017,0.0,0.0,0.148,0.189,0.63
+suited_connectors_BTN_short_huge_late,suited,,connectors,BTN,short,huge,6,CALL_HIGH,0.625,0.375,0.0,0.0,0.625,0.0,0.0,0.0
+suited_connectors_BB_deep_tiny_middle,suited,,connectors,BB,deep,tiny,5,CALL_SMALL,0.624,0.256,0.624,0.0,0.0,0.04,0.04,0.04
+suited_gappers_BTN_short_huge_late,suited,,gappers,BTN,short,huge,18,FOLD,0.579,0.579,0.0,0.0,0.421,0.0,0.0,0.0
+suited_broadway_BB_short_large_early,suited,,broadway,BB,short,large,13,RAISE_HIGH,0.57,0.031,0.0,0.0,0.031,0.064,0.303,0.57
+trash_BTN_very_deep_no_bet_late,trash,"72o, 83o, 94o",BTN,very,deep,no,9,RAISE_HIGH,0.565,0.028,0.0,0.0,0.0,0.205,0.202,0.565
+medium_aces_BTN_very_deep_no_bet_middle,medium,,aces,BTN,very,deep,11,RAISE_HIGH,0.557,0.023,0.0,0.0,0.0,0.112,0.309,0.557
+small_pairs_BB_very_deep_tiny_bubble,small,,pairs,BB,very,deep,12,RAISE_HIGH,0.552,0.017,0.017,0.0,0.0,0.143,0.272,0.552
+medium_aces_BB_ultra_short_tiny_early,medium,,aces,BB,ultra,short,9,RAISE_HIGH,0.534,0.022,0.022,0.0,0.0,0.13,0.292,0.534
+premium_pairs_BTN_very_deep_no_bet_late,premium,,pairs,BTN,very,deep,9,RAISE_HIGH,0.534,0.028,0.0,0.0,0.0,0.182,0.257,0.534
+premium_pairs_BB_medium_small_late,premium,,pairs,BB,medium,small,7,RAISE_HIGH,0.533,0.029,0.029,0.0,0.0,0.329,0.08,0.533
+offsuit_broadway_BTN_deep_tiny_late,offsuit,,broadway,BTN,deep,tiny,10,RAISE_HIGH,0.522,0.02,0.02,0.0,0.0,0.192,0.247,0.522
+medium_aces_BTN_deep_no_bet_early,medium,,aces,BTN,deep,no,11,RAISE_HIGH,0.499,0.045,0.0,0.0,0.0,0.243,0.213,0.499
+suited_connectors_BTN_very_deep_no_bet_late,suited,,connectors,BTN,very,deep,11,RAISE_HIGH,0.497,0.023,0.0,0.0,0.0,0.158,0.323,0.497
+trash_BTN_medium_no_bet_early,trash,"72o, 83o, 94o",BTN,medium,no,bet,11,RAISE_HIGH,0.497,0.023,0.0,0.0,0.0,0.088,0.391,0.497
+premium_pairs_BB_short_tiny_late,premium,,pairs,BB,short,tiny,11,RAISE_HIGH,0.493,0.018,0.018,0.0,0.0,0.138,0.333,0.493
+medium_pairs_BB_short_tiny_middle,medium,,pairs,BB,short,tiny,8,RAISE_MID,0.493,0.05,0.05,0.0,0.0,0.294,0.493,0.113
+medium_pairs_BB_short_large_bubble,medium,,pairs,BB,short,large,13,RAISE_HIGH,0.491,0.015,0.0,0.0,0.015,0.203,0.275,0.491
+trash_BTN_medium_tiny_late,trash,"72o, 83o, 94o",BTN,medium,tiny,late,12,RAISE_HIGH,0.491,0.017,0.017,0.0,0.0,0.171,0.304,0.491
+weak_aces_BB_very_deep_tiny_late,weak,,aces,BB,very,deep,11,RAISE_HIGH,0.489,0.018,0.018,0.0,0.0,0.198,0.277,0.489
+small_pairs_BB_very_deep_tiny_late,small,,pairs,BB,very,deep,14,RAISE_HIGH,0.475,0.014,0.014,0.0,0.0,0.2,0.296,0.475
+premium_aces_BTN_deep_no_bet_late,premium,,aces,BTN,deep,no,9,RAISE_HIGH,0.465,0.028,0.0,0.0,0.0,0.194,0.313,0.465
+small_pairs_BTN_short_small_late,small,,pairs,BTN,short,small,11,RAISE_HIGH,0.462,0.19,0.018,0.0,0.0,0.13,0.2,0.462
+suited_broadway_BB_very_deep_tiny_late,suited,,broadway,BB,very,deep,13,RAISE_HIGH,0.461,0.015,0.015,0.0,0.0,0.188,0.32,0.461
+premium_pairs_BTN_very_deep_tiny_late,premium,,pairs,BTN,very,deep,9,RAISE_HIGH,0.436,0.022,0.022,0.0,0.0,0.16,0.36,0.436
+weak_aces_BB_medium_tiny_early,weak,,aces,BB,medium,tiny,14,RAISE_HIGH,0.434,0.014,0.014,0.0,0.0,0.149,0.388,0.434
+suited_broadway_BB_ultra_short_tiny_bubble,suited,,broadway,BB,ultra,short,7,RAISE_MID,0.434,0.029,0.029,0.0,0.0,0.17,0.434,0.339
+suited_broadway_BTN_short_no_bet_late,suited,,broadway,BTN,short,no,5,RAISE_HIGH,0.433,0.05,0.0,0.0,0.0,0.141,0.376,0.433
+premium_aces_BB_deep_tiny_late,premium,,aces,BB,deep,tiny,8,RAISE_HIGH,0.429,0.025,0.025,0.0,0.0,0.137,0.384,0.429
+medium_pairs_BTN_short_no_bet_middle,medium,,pairs,BTN,short,no,11,RAISE_HIGH,0.428,0.091,0.0,0.0,0.0,0.181,0.301,0.428
+medium_aces_BTN_medium_tiny_middle,medium,,aces,BTN,medium,tiny,9,RAISE_MID,0.424,0.022,0.022,0.0,0.0,0.203,0.424,0.328
+offsuit_broadway_BTN_short_small_late,offsuit,,broadway,BTN,short,small,10,RAISE_HIGH,0.406,0.02,0.0,0.02,0.0,0.213,0.342,0.406
+suited_connectors_BTN_medium_no_bet_late,suited,,connectors,BTN,medium,no,7,RAISE_MID,0.406,0.036,0.0,0.0,0.0,0.203,0.406,0.355
+suited_gappers_BTN_deep_tiny_early,suited,,gappers,BTN,deep,tiny,9,RAISE_MID,0.39,0.022,0.1,0.0,0.0,0.203,0.39,0.285
+small_pairs_BTN_deep_no_bet_middle,small,,pairs,BTN,deep,no,9,RAISE_HIGH,0.384,0.028,0.0,0.0,0.0,0.265,0.324,0.384
+medium_pairs_BTN_medium_tiny_bubble,medium,,pairs,BTN,medium,tiny,12,RAISE_HIGH,0.377,0.017,0.017,0.0,0.0,0.214,0.375,0.377
+weak_aces_BTN_medium_small_early,weak,,aces,BTN,medium,small,12,RAISE_HIGH,0.339,0.033,0.225,0.0,0.0,0.161,0.242,0.339
+premium_aces_BB_medium_tiny_bubble,premium,,aces,BB,medium,tiny,9,RAISE_HIGH,0.325,0.224,0.06,0.0,0.0,0.138,0.253,0.325
+offsuit_broadway_BTN_deep_no_bet_early,offsuit,,broadway,BTN,deep,no,10,FOLD,0.25,0.25,0.0,0.0,0.0,0.25,0.25,0.25
+suited_gappers_BTN_medium_no_bet_middle,suited,,gappers,BTN,medium,no,8,FOLD,0.25,0.25,0.0,0.0,0.0,0.25,0.25,0.25
