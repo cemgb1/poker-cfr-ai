@@ -1,0 +1,20 @@
+scenario_key,hand_category,example_hands,position,stack_depth,bet_size_category,tournament_stage,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
+medium_aces_BTN_short_huge_early,medium,,aces,BTN,short,huge,6,CALL_HIGH,0.917,0.083,0.0,0.0,0.917,0.0,0.0,0.0
+suited_connectors_BTN_short_huge_late,suited,,connectors,BTN,short,huge,14,CALL_HIGH,0.808,0.192,0.0,0.0,0.808,0.0,0.0,0.0
+suited_gappers_BB_ultra_short_large_late,suited,,gappers,BB,ultra,short,13,FOLD,0.773,0.773,0.0,0.0,0.167,0.015,0.015,0.029
+suited_broadway_BB_very_deep_tiny_early,suited,,broadway,BB,very,deep,9,CALL_SMALL,0.611,0.044,0.611,0.0,0.0,0.123,0.115,0.106
+premium_aces_BTN_deep_no_bet_late,premium,,aces,BTN,deep,no,6,RAISE_HIGH,0.552,0.042,0.0,0.0,0.0,0.196,0.21,0.552
+trash_BTN_short_no_bet_late,trash,"72o, 83o, 94o",BTN,short,no,bet,7,RAISE_HIGH,0.546,0.036,0.0,0.0,0.0,0.147,0.271,0.546
+suited_broadway_BB_ultra_short_large_early,suited,,broadway,BB,ultra,short,6,RAISE_HIGH,0.522,0.033,0.0,0.0,0.033,0.242,0.169,0.522
+premium_aces_BB_medium_small_early,premium,,aces,BB,medium,small,6,RAISE_HIGH,0.515,0.033,0.0,0.033,0.0,0.098,0.32,0.515
+suited_connectors_BB_very_deep_tiny_bubble,suited,,connectors,BB,very,deep,12,RAISE_HIGH,0.506,0.017,0.017,0.0,0.0,0.145,0.316,0.506
+premium_pairs_BTN_short_small_early,premium,,pairs,BTN,short,small,9,RAISE_HIGH,0.5,0.022,0.0,0.022,0.0,0.202,0.254,0.5
+premium_pairs_BTN_very_deep_no_bet_middle,premium,,pairs,BTN,very,deep,6,RAISE_HIGH,0.498,0.042,0.0,0.0,0.0,0.243,0.217,0.498
+offsuit_broadway_BB_very_deep_tiny_bubble,offsuit,,broadway,BB,very,deep,33,RAISE_HIGH,0.495,0.006,0.006,0.0,0.0,0.197,0.296,0.495
+medium_pairs_BTN_medium_small_early,medium,,pairs,BTN,medium,small,12,RAISE_MID,0.487,0.017,0.017,0.0,0.0,0.135,0.487,0.344
+medium_pairs_BB_very_deep_tiny_late,medium,,pairs,BB,very,deep,8,RAISE_HIGH,0.459,0.025,0.025,0.0,0.0,0.205,0.286,0.459
+weak_aces_BB_very_deep_tiny_bubble,weak,,aces,BB,very,deep,12,RAISE_HIGH,0.434,0.017,0.017,0.0,0.0,0.183,0.349,0.434
+medium_aces_BTN_deep_no_bet_late,medium,,aces,BTN,deep,no,11,RAISE_HIGH,0.402,0.023,0.0,0.0,0.0,0.229,0.346,0.402
+small_pairs_BB_ultra_short_tiny_bubble,small,,pairs,BB,ultra,short,9,RAISE_HIGH,0.372,0.022,0.022,0.0,0.0,0.248,0.336,0.372
+small_pairs_BB_deep_tiny_middle,small,,pairs,BB,deep,tiny,11,RAISE_HIGH,0.362,0.036,0.316,0.0,0.0,0.161,0.125,0.362
+suited_gappers_BB_deep_tiny_early,suited,,gappers,BB,deep,tiny,10,CALL_SMALL,0.338,0.02,0.338,0.0,0.0,0.098,0.334,0.21
