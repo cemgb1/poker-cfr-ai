@@ -14,7 +14,7 @@ from enhanced_cfr_trainer_v2 import EnhancedCFRTrainer
 from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
 import random
 
-def demo_performance_tracking(n_scenarios=50, n_iterations=500, metrics_interval=100):
+def demo_performance_tracking(n_scenarios=50, n_iterations=5000, metrics_interval=100):
     """
     Demonstrate performance metrics tracking during CFR training.
     

@@ -98,8 +98,7 @@ def create_enhanced_scenario(scenario_id, hand_category):
         bet_size_category = get_bet_size_category(bet_to_call_bb, hero_stack_bb)
         pot_odds = calculate_pot_odds(bet_to_call_bb, hero_position)
         
-        # Tournament context
-        tournament_stage = random.choice(TOURNAMENT_STAGES)
+        # Tournament context - removed tournament_stage parameter
         
         # Create enhanced scenario
         scenario = {
@@ -121,8 +120,7 @@ def create_enhanced_scenario(scenario_id, hand_category):
             "bet_size_category": bet_size_category,
             "pot_odds": round(pot_odds, 2),
             
-            # Tournament context
-            "tournament_stage": tournament_stage,
+            # Tournament context - removed tournament_stage
             "blinds_level": random.choice(["low", "medium", "high"]),
             
             # Available actions for this scenario
@@ -333,11 +331,11 @@ def analyze_scenario_distribution(scenarios):
     for bet_cat, count in bet_size_counts.most_common():
         print(f"  {bet_cat:8s}: {count:3d} scenarios")
     
-    # Tournament stages
-    tournament_counts = Counter(s['tournament_stage'] for s in scenarios)
-    print(f"\nTournament Stages:")
-    for stage, count in tournament_counts.most_common():
-        print(f"  {stage:8s}: {count:3d} scenarios")
+    # Tournament stages - removed from distribution analysis
+    # tournament_counts = Counter(s['tournament_stage'] for s in scenarios)
+    # print(f"\nTournament Stages:")
+    # for stage, count in tournament_counts.most_common():
+    #     print(f"  {stage:8s}: {count:3d} scenarios")
     
     # Available actions variety
     action_variety = set()
@@ -360,7 +358,7 @@ if __name__ == "__main__":
     for i, scenario in enumerate(scenarios[:8]):
         print(f"{i+1}. {scenario['hand_category']:15s} | {scenario['hero_cards']:8s} | "
               f"{scenario['stack_category']:12s} ({scenario['hero_stack_bb']:2d}bb) | "
-              f"{scenario['bet_size_category']:5s} bet | {scenario['tournament_stage']:6s}")
+              f"{scenario['bet_size_category']:5s} bet")
         print(f"   Available actions: {', '.join(scenario['available_actions'])}")
     
     print(f"\n💡 Enhanced CFR Ready!")
