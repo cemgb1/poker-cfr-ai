@@ -33,7 +33,7 @@ class EnhancedCFRTrainer:
         self.performance_metrics = []
         self.start_time = None
         self.last_iteration_time = None
-
+        
         # Generate enhanced scenarios, or use provided ones
         if scenarios is not None:
             self.scenarios = scenarios
@@ -41,9 +41,14 @@ class EnhancedCFRTrainer:
         else:
             self.scenarios = generate_enhanced_scenarios(n_scenarios)
             print(f"🚀 Generated {n_scenarios} scenarios...")
+
+        # Balanced hand category sampling (after scenarios are loaded)
+        self.hand_category_visits = defaultdict(int)
+        self.scenarios_by_category = self._group_scenarios_by_category()
             
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
+        print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
 
     def get_strategy(self, scenario_key, available_actions):
         """Get strategy using regret matching for available actions only"""
@@ -66,6 +71,47 @@ class EnhancedCFRTrainer:
             strategy[action] = strategy_probs[i]
             
         return strategy
+
+    def _group_scenarios_by_category(self):
+        """Group scenarios by hand category for balanced sampling"""
+        scenarios_by_category = defaultdict(list)
+        for scenario in self.scenarios:
+            category = scenario['hand_category']
+            scenarios_by_category[category].append(scenario)
+        return dict(scenarios_by_category)
+    
+    def select_balanced_scenario(self):
+        """
+        Select scenario using stratified sampling to ensure balanced hand category coverage.
+        Prioritizes categories with fewer visits to maintain proportional training.
+        """
+        if not self.hand_category_visits:
+            # First iteration - select random category
+            category = random.choice(list(self.scenarios_by_category.keys()))
+        else:
+            # Calculate weights based on visit counts (inverse weighting)
+            max_visits = max(self.hand_category_visits.values())
+            category_weights = {}
+            
+            for category in self.scenarios_by_category.keys():
+                current_visits = self.hand_category_visits.get(category, 0)
+                # Inverse weighting - less visited categories get higher weight
+                weight = max_visits + 1 - current_visits
+                category_weights[category] = max(weight, 1)  # Minimum weight of 1
+            
+            # Select category based on weights
+            categories = list(category_weights.keys())
+            weights = list(category_weights.values())
+            weight_probs = np.array(weights) / sum(weights)
+            category = np.random.choice(categories, p=weight_probs)
+        
+        # Select random scenario from chosen category
+        scenario = random.choice(self.scenarios_by_category[category])
+        
+        # Update category visit count
+        self.hand_category_visits[category] += 1
+        
+        return scenario
 
     def sample_action(self, strategy, available_actions):
         """Sample action from strategy probabilities"""
@@ -452,8 +498,30 @@ class EnhancedCFRTrainer:
         
         return histogram
 
+    def calculate_scenario_space_coverage(self):
+        """Calculate scenario space coverage statistics"""
+        from enhanced_cfr_preflop_generator_v2 import PREFLOP_HAND_RANGES, STACK_CATEGORIES
+        
+        # Calculate theoretical maximum scenarios
+        hand_categories = len(PREFLOP_HAND_RANGES)
+        positions = 2  # BTN, BB
+        stack_categories = len(STACK_CATEGORIES)
+        bet_size_categories = 5  # no_bet, tiny, small, large, huge
+        blinds_levels = 3  # low, medium, high
+        
+        total_possible = hand_categories * positions * stack_categories * bet_size_categories * blinds_levels
+        
+        # Calculate coverage percentage
+        unique_scenarios_visited = len(self.scenario_counter)
+        coverage_percentage = (unique_scenarios_visited / total_possible) * 100 if total_possible > 0 else 0
+        
+        return {
+            'total_possible': total_possible,
+            'coverage_percentage': round(coverage_percentage, 2)
+        }
+
     def record_iteration_metrics(self, iteration):
-        """Record performance metrics for this iteration"""
+        """Record performance metrics for this iteration with enhanced coverage tracking"""
         current_time = time.time()
         
         # Calculate timing metrics
@@ -467,7 +535,10 @@ class EnhancedCFRTrainer:
         unique_scenarios = len(self.scenario_counter)
         coverage_histogram = self.get_scenario_coverage_histogram()
         
-        # Record metrics
+        # Calculate scenario space analysis
+        scenario_space_stats = self.calculate_scenario_space_coverage()
+        
+        # Record metrics with enhanced coverage data
         metrics = {
             'iteration': iteration,
             'time_per_iteration': time_per_iteration,
@@ -479,7 +550,10 @@ class EnhancedCFRTrainer:
             'scenario_coverage_11_25': coverage_histogram.get('11-25', 0),
             'scenario_coverage_26_50': coverage_histogram.get('26-50', 0),
             'scenario_coverage_51_100': coverage_histogram.get('51-100', 0),
-            'scenario_coverage_100_plus': coverage_histogram.get('100+', 0)
+            'scenario_coverage_100_plus': coverage_histogram.get('100+', 0),
+            'total_possible_scenarios': scenario_space_stats['total_possible'],
+            'scenario_coverage_percentage': scenario_space_stats['coverage_percentage'],
+            **{f'hand_category_{cat}_visits': visits for cat, visits in self.hand_category_visits.items()}
         }
         
         self.performance_metrics.append(metrics)
@@ -522,12 +596,13 @@ if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
     # Add a simple training function for testing
-    def run_enhanced_training(n_scenarios=100, n_iterations=1000, metrics_interval=100):
-        """Run enhanced CFR training with expanded action set and performance tracking"""
-        print(f"🚀 Running Enhanced CFR Training with Performance Tracking")
+    def run_enhanced_training(n_scenarios=100, n_iterations=200000, metrics_interval=1000):
+        """Run enhanced CFR training with balanced sampling and performance tracking"""
+        print(f"🚀 Running Enhanced CFR Training with Balanced Hand Category Coverage")
         print(f"Scenarios: {n_scenarios}, Iterations: {n_iterations}")
         print(f"Metrics interval: every {metrics_interval} iterations")
         print(f"Action set: FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH")
+        print(f"🎯 Using STRATIFIED SAMPLING for balanced hand category coverage")
         print("=" * 70)
         
         # Generate scenarios
@@ -540,11 +615,11 @@ if __name__ == "__main__":
         # Start performance tracking
         trainer.start_performance_tracking()
         
-        # Train with performance tracking
-        print(f"\n🎯 Starting CFR training with performance metrics...")
+        # Train with balanced sampling and performance tracking
+        print(f"\n🎯 Starting CFR training with balanced sampling...")
         for iteration in range(n_iterations):
-            # Pick random scenario for this iteration
-            scenario = random.choice(scenarios)
+            # Use balanced scenario selection instead of random
+            scenario = trainer.select_balanced_scenario()
             trainer.play_enhanced_scenario(scenario)
             trainer.scenario_counter[trainer.get_scenario_key(scenario)] += 1
             
@@ -552,15 +627,19 @@ if __name__ == "__main__":
             if iteration % metrics_interval == 0:
                 metrics = trainer.record_iteration_metrics(iteration)
                 if iteration > 0:  # Skip first iteration for meaningful timing
-                    print(f"Iteration {iteration:4d}: {metrics['unique_scenarios_visited']:3d} scenarios, "
-                          f"avg_regret={metrics['average_regret']:.6f}, "
-                          f"time={metrics['time_per_iteration']:.4f}s")
+                    print(f"Iteration {iteration:6d}: {metrics['unique_scenarios_visited']:3d} scenarios, "
+                          f"coverage={metrics['scenario_coverage_percentage']:5.1f}%, "
+                          f"avg_regret={metrics['average_regret']:.6f}")
         
         # Record final metrics
         final_metrics = trainer.record_iteration_metrics(n_iterations - 1)
         
-        print(f"✅ Training complete after {n_iterations} iterations")
+        print(f"✅ Training complete after {n_iterations:,} iterations")
         print(f"📊 Learned strategies for {len(trainer.strategy_sum)} scenarios")
+        print(f"🎯 Hand category coverage balance:")
+        for category, visits in trainer.hand_category_visits.items():
+            percentage = (visits / n_iterations) * 100
+            print(f"   {category:15s}: {visits:6d} visits ({percentage:5.1f}%)")
         
         # Export both strategy results and performance metrics
         trainer.export_strategies_to_csv("enhanced_cfr_results.csv")

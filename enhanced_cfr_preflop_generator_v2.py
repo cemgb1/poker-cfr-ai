@@ -73,7 +73,33 @@ def generate_enhanced_scenarios(n_scenarios=1000):
     # Show enhanced distribution
     analyze_scenario_distribution(scenarios)
     
+    # Display scenario space analysis
+    analyze_scenario_space()
+    
     return scenarios
+
+def analyze_scenario_space():
+    """Analyze and display total possible scenario combinations"""
+    print(f"\n🧠 SCENARIO SPACE ANALYSIS:")
+    
+    # Calculate theoretical maximum scenarios
+    hand_categories = len(PREFLOP_HAND_RANGES)
+    positions = 2  # BTN, BB
+    stack_categories = len(STACK_CATEGORIES)  
+    bet_size_categories = 5  # no_bet, tiny, small, large, huge
+    blinds_levels = 3  # low, medium, high
+    
+    total_possible = hand_categories * positions * stack_categories * bet_size_categories * blinds_levels
+    
+    print(f"Hand categories: {hand_categories}")
+    print(f"Positions: {positions} (BTN, BB)")
+    print(f"Stack categories: {stack_categories} ({list(STACK_CATEGORIES.keys())})")
+    print(f"Bet size categories: {bet_size_categories} (no_bet, tiny, small, large, huge)")
+    print(f"Blinds levels: {blinds_levels} (low, medium, high)")
+    print(f"")
+    print(f"🎯 THEORETICAL MAXIMUM SCENARIOS: {total_possible:,}")
+    print(f"   This represents the complete scenario space that CFR can explore")
+    print(f"   With balanced sampling, each category gets proportional coverage")
 
 def create_enhanced_scenario(scenario_id, hand_category):
     """Create enhanced scenario with stack and tournament context"""
