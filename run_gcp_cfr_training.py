@@ -154,9 +154,8 @@ class GCPCFRTrainer:
             local_iteration_count = 0
             
             for iteration in range(iterations_per_worker):
-                # Get balanced scenario batch for this iteration
-                scenario_batch = self.get_balanced_scenario_batch(1)
-                scenario = scenario_batch[0]
+                # Use balanced scenario selection for better coverage
+                scenario = local_trainer.select_balanced_scenario()
                 
                 # Train on scenario
                 result = local_trainer.play_enhanced_scenario(scenario)
@@ -194,7 +193,7 @@ class GCPCFRTrainer:
             self.logger.error(f"❌ Worker {worker_id} failed: {e}")
             self.shared_queue.put(('error', worker_id, str(e)))
     
-    def run_parallel_training(self, total_iterations=50000):
+    def run_parallel_training(self, total_iterations=200000):
         """
         Main training loop with parallel processing and periodic logging
         """
@@ -526,8 +525,8 @@ def main():
     setup_signal_handlers(trainer)
     
     try:
-        # Run parallel training (50k iterations for production quality)
-        trainer.run_parallel_training(total_iterations=50000)
+        # Run parallel training (200k iterations for deeper learning)
+        trainer.run_parallel_training(total_iterations=200000)
         
         # Export lookup table CSV (main requirement)
         lookup_df = trainer.export_lookup_table_csv("gcp_cfr_lookup_table.csv")
