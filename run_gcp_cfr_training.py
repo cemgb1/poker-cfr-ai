@@ -193,6 +193,76 @@ class GCPCFRTrainer:
             self.logger.error(f"❌ Worker {worker_id} failed: {e}")
             self.shared_queue.put(('error', worker_id, str(e)))
     
+    def run_sequential_training(self, iterations_per_scenario=1000, 
+                              stopping_condition_window=100, regret_stability_threshold=0.01):
+        """
+        Run sequential training approach - processes all scenarios in order
+        until each meets its stopping condition
+        """
+        self.logger.info(f"🎯 Starting GCP Sequential CFR Training")
+        self.logger.info(f"   📊 Total scenarios: {len(self.scenarios):,}")
+        self.logger.info(f"   🔄 Iterations per scenario: {iterations_per_scenario:,}")
+        self.logger.info(f"   🛑 Stopping window: {stopping_condition_window}")
+        self.logger.info(f"   📈 Regret threshold: {regret_stability_threshold}")
+        
+        # Initialize sequential trainer
+        from enhanced_cfr_trainer_v2 import SequentialScenarioTrainer
+        sequential_trainer = SequentialScenarioTrainer(
+            scenarios=self.scenarios,
+            iterations_per_scenario=iterations_per_scenario,
+            stopping_condition_window=stopping_condition_window,
+            regret_stability_threshold=regret_stability_threshold
+        )
+        
+        training_start_time = time.time()
+        
+        # Run sequential training
+        results = sequential_trainer.run_sequential_training()
+        
+        training_end_time = time.time()
+        total_time = training_end_time - training_start_time
+        
+        # Log comprehensive results
+        self.logger.info(f"✅ Sequential training completed!")
+        self.logger.info(f"   ⏱️  Total time: {total_time/3600:.2f} hours")
+        self.logger.info(f"   📊 Scenarios processed: {len(results):,}")
+        
+        total_iterations = sum(r['iterations_completed'] for r in results)
+        avg_iterations = total_iterations / len(results) if results else 0
+        
+        self.logger.info(f"   🔢 Total iterations: {total_iterations:,}")
+        self.logger.info(f"   🎯 Avg iterations per scenario: {avg_iterations:.1f}")
+        
+        # Stopping condition analysis
+        from collections import Counter
+        stop_reasons = Counter(r['stop_reason'] for r in results)
+        self.logger.info(f"   📈 Stopping reasons:")
+        for reason, count in stop_reasons.items():
+            percentage = (count / len(results)) * 100
+            self.logger.info(f"      {reason}: {count} scenarios ({percentage:.1f}%)")
+        
+        # Export enhanced results with timestamps
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        strategies_file = f"gcp_sequential_strategies_{timestamp}.csv"
+        completion_file = f"gcp_scenario_completion_{timestamp}.csv"
+        
+        sequential_trainer.export_strategies_to_csv(strategies_file)
+        sequential_trainer.export_scenario_completion_report(completion_file)
+        
+        self.output_files.extend([strategies_file, completion_file])
+        
+        self.logger.info(f"📁 Exported files:")
+        self.logger.info(f"   - {strategies_file}")
+        self.logger.info(f"   - {completion_file}")
+        
+        return {
+            'results': results,
+            'trainer': sequential_trainer,
+            'total_time': total_time,
+            'total_iterations': total_iterations,
+            'output_files': [strategies_file, completion_file]
+        }
+
     def run_parallel_training(self, total_iterations=200000):
         """
         Main training loop with parallel processing and periodic logging
@@ -508,46 +578,91 @@ def setup_signal_handlers(trainer):
 
 def main():
     """
-    Main GCP CFR Training execution
-    Production-ready training with all required features
+    Main GCP CFR Training execution with support for both parallel and sequential approaches
     """
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="GCP CFR Training System")
+    parser.add_argument("--mode", choices=["parallel", "sequential"], default="parallel",
+                       help="Training mode: parallel (original) or sequential (new)")
+    parser.add_argument("--iterations", type=int, default=200000,
+                       help="Total iterations for parallel mode")
+    parser.add_argument("--iterations-per-scenario", type=int, default=1000,
+                       help="Iterations per scenario for sequential mode")
+    parser.add_argument("--stopping-window", type=int, default=100,
+                       help="Stopping condition window size for sequential mode")
+    parser.add_argument("--regret-threshold", type=float, default=0.01,
+                       help="Regret stability threshold for sequential mode")
+    parser.add_argument("--workers", type=int, default=None,
+                       help="Number of worker processes (default: all CPU cores)")
+    
+    args = parser.parse_args()
+    
     print("🚀 GCP CFR Training System Starting...")
     print("=" * 80)
+    print(f"🎯 Training mode: {args.mode.upper()}")
     
     # Initialize trainer with production settings
     trainer = GCPCFRTrainer(
-        n_workers=mp.cpu_count(),   # Use all CPU cores
-        log_interval_minutes=15     # Log every 15 minutes as required
+        n_workers=args.workers or mp.cpu_count(),
+        log_interval_minutes=15
     )
     
     # Setup graceful shutdown
     setup_signal_handlers(trainer)
     
     try:
-        # Run parallel training (200k iterations for deeper learning)
-        trainer.run_parallel_training(total_iterations=200000)
+        if args.mode == "sequential":
+            # Run new sequential training approach
+            print(f"📊 Sequential Training Parameters:")
+            print(f"   🔄 Iterations per scenario: {args.iterations_per_scenario:,}")
+            print(f"   🛑 Stopping window: {args.stopping_window}")
+            print(f"   📈 Regret threshold: {args.regret_threshold}")
+            
+            result = trainer.run_sequential_training(
+                iterations_per_scenario=args.iterations_per_scenario,
+                stopping_condition_window=args.stopping_window,
+                regret_stability_threshold=args.regret_threshold
+            )
+            
+            # Sequential training handles its own exports
+            print("\n🎯 SEQUENTIAL CFR TRAINING COMPLETE!")
+            print("✅ New approach features:")
+            print("   📋 Sequential scenario processing")
+            print("   🛑 Automatic stopping conditions")
+            print("   ⏱️  Real-time progress estimation")
+            print("   📊 Enhanced completion reporting")
+            
+        else:
+            # Run original parallel training approach
+            print(f"📊 Parallel Training Parameters:")
+            print(f"   🔢 Total iterations: {args.iterations:,}")
+            print(f"   👥 Workers: {trainer.n_workers}")
+            
+            trainer.run_parallel_training(total_iterations=args.iterations)
+            
+            # Export lookup table CSV (main requirement)
+            lookup_df = trainer.export_lookup_table_csv("gcp_cfr_lookup_table.csv")
+            
+            # Export performance metrics CSV (requirement)
+            performance_df = trainer.export_performance_metrics_csv("gcp_cfr_performance.csv")
+            
+            # Final training summary
+            trainer.logger.info("🏆 GCP CFR Training Completed Successfully!")
+            trainer.logger.info(f"📊 Lookup table exported: {len(lookup_df) if lookup_df is not None else 0} scenarios")
+            trainer.logger.info(f"📈 Performance metrics exported: {len(performance_df) if performance_df is not None else 0} data points")
+            
+            print("\n🎯 PARALLEL CFR TRAINING COMPLETE!")
+            print("✅ Original approach features:")
+            print("   🖥️  Used all CPU cores (multiprocessing)")
+            print("   ⚖️  Balanced hand category coverage")
+            print("   📊 Generated lookup-table CSV")
+            print("   📝 Comprehensive logging")
         
-        # Export lookup table CSV (main requirement)
-        lookup_df = trainer.export_lookup_table_csv("gcp_cfr_lookup_table.csv")
-        
-        # Export performance metrics CSV (requirement)
-        performance_df = trainer.export_performance_metrics_csv("gcp_cfr_performance.csv")
-        
-        # Final training summary
-        trainer.logger.info("🏆 GCP CFR Training Completed Successfully!")
-        trainer.logger.info(f"📊 Lookup table exported: {len(lookup_df) if lookup_df is not None else 0} scenarios")
-        trainer.logger.info(f"📈 Performance metrics exported: {len(performance_df) if performance_df is not None else 0} data points")
-        
-        # Cleanup and archive unused files (requirement)
+        # Cleanup and archive unused files
         trainer.cleanup_and_archive_files()
         
-        print("\n🎯 GCP CFR TRAINING COMPLETE!")
-        print("✅ All requirements satisfied:")
-        print("   🖥️  Used all CPU cores (multiprocessing)")
-        print("   ⚖️  Sampled least-trained hand groups for balanced coverage") 
-        print("   📊 Generated lookup-table CSV with percentage choices per action")
-        print("   📝 Logged every 15 minutes and every 500+ iterations")
-        print("   📈 Recorded model performance to separate CSV")
+        print("\n📁 File management completed:")
         print("   🧹 Moved unused files to archivefolder")
         print("   💎 Only essential model files remain in repo root")
         

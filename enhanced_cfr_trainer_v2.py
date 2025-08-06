@@ -619,6 +619,309 @@ class EnhancedCFRTrainer:
         
         return df
 
+class SequentialScenarioTrainer(EnhancedCFRTrainer):
+    """
+    Sequential Scenario Trainer - processes scenarios sequentially with stopping conditions
+    
+    Key differences from EnhancedCFRTrainer:
+    1. Processes scenarios sequentially from a pre-generated list
+    2. Runs fixed iterations (X) per scenario until stopping condition (Y) is met
+    3. Stopping condition based on average regret stabilization
+    4. Enhanced logging with time estimates and remaining iterations
+    """
+    
+    def __init__(self, scenarios=None, iterations_per_scenario=1000, 
+                 stopping_condition_window=100, regret_stability_threshold=0.001):
+        super().__init__(scenarios)
+        
+        # Sequential training parameters
+        self.iterations_per_scenario = iterations_per_scenario
+        self.stopping_condition_window = stopping_condition_window
+        self.regret_stability_threshold = regret_stability_threshold
+        
+        # Create scenario list for sequential processing
+        self.scenario_list = list(self.scenarios)
+        self.current_scenario_index = 0
+        self.completed_scenarios = []
+        
+        # Enhanced tracking for sequential training
+        self.scenario_regret_history = defaultdict(list)  # Track regret history per scenario
+        self.scenario_completion_times = {}
+        self.scenario_iteration_counts = defaultdict(int)
+        
+        print(f"🎯 Sequential Scenario Trainer Initialized!")
+        print(f"📊 Total scenarios to process: {len(self.scenario_list)}")
+        print(f"🔄 Iterations per scenario: {self.iterations_per_scenario}")
+        print(f"🛑 Stopping condition window: {self.stopping_condition_window} iterations")
+        print(f"📈 Regret stability threshold: {self.regret_stability_threshold}")
+    
+    def check_stopping_condition(self, scenario_key):
+        """
+        Check if stopping condition is met for the current scenario
+        Returns True if average regret has stabilized over the window
+        """
+        regret_history = self.scenario_regret_history[scenario_key]
+        
+        # Need at least window size + buffer for meaningful comparison
+        if len(regret_history) < self.stopping_condition_window + 20:
+            return False
+        
+        # Compare recent window average vs earlier window average
+        recent_window = regret_history[-self.stopping_condition_window:]
+        earlier_window = regret_history[-self.stopping_condition_window*2:-self.stopping_condition_window]
+        
+        if not earlier_window:  # Not enough history
+            return False
+        
+        recent_avg = np.mean(recent_window)
+        earlier_avg = np.mean(earlier_window)
+        
+        # Calculate relative change in average regret
+        if earlier_avg == 0:
+            relative_change = abs(recent_avg)
+        else:
+            relative_change = abs(recent_avg - earlier_avg) / abs(earlier_avg)
+        
+        is_stable = relative_change < self.regret_stability_threshold
+        
+        return is_stable
+    
+    def get_current_scenario_regret(self, scenario_key):
+        """Calculate current average regret for a scenario"""
+        if scenario_key not in self.regret_sum:
+            return 0.0
+        
+        scenario_regrets = self.regret_sum[scenario_key]
+        if not scenario_regrets:
+            return 0.0
+        
+        # Calculate average absolute regret for this scenario
+        total_regret = sum(abs(regret) for regret in scenario_regrets.values())
+        avg_regret = total_regret / len(scenario_regrets)
+        return avg_regret
+    
+    def process_single_scenario(self, scenario, max_iterations=None):
+        """
+        Process a single scenario with fixed iterations until stopping condition
+        Returns dict with processing results
+        """
+        scenario_key = self.get_scenario_key(scenario)
+        start_time = time.time()
+        iteration_count = 0
+        max_iter = max_iterations or self.iterations_per_scenario * 10  # Safety limit
+        
+        print(f"\n🎯 Processing scenario: {scenario_key}")
+        print(f"   Hand: {scenario['hand_category']}, Position: {scenario['hero_position']}, "
+              f"Stack: {scenario['stack_category']}, Blinds: {scenario['blinds_level']}")
+        
+        while iteration_count < max_iter:
+            # Run one training iteration for this scenario
+            result = self.play_enhanced_scenario(scenario)
+            self.scenario_counter[scenario_key] += 1
+            iteration_count += 1
+            
+            # Record regret for stopping condition check
+            current_regret = self.get_current_scenario_regret(scenario_key)
+            self.scenario_regret_history[scenario_key].append(current_regret)
+            
+            # Check stopping condition every batch of iterations
+            if iteration_count >= self.stopping_condition_window and iteration_count % 50 == 0:
+                if self.check_stopping_condition(scenario_key):
+                    print(f"✅ Stopping condition met after {iteration_count} iterations "
+                          f"(regret stabilized: {current_regret:.6f})")
+                    break
+            
+            # Progress logging every certain iterations
+            if iteration_count % max(self.iterations_per_scenario // 4, 100) == 0:
+                print(f"   Iteration {iteration_count:4d}: regret={current_regret:.6f}")
+        
+        # Record completion
+        end_time = time.time()
+        processing_time = end_time - start_time
+        self.scenario_completion_times[scenario_key] = processing_time
+        self.scenario_iteration_counts[scenario_key] = iteration_count
+        
+        # Determine why processing stopped
+        if iteration_count >= max_iter:
+            stop_reason = "max_iterations_reached"
+        elif self.check_stopping_condition(scenario_key):
+            stop_reason = "regret_stabilized"
+        else:
+            stop_reason = "unknown"
+        
+        final_regret = self.get_current_scenario_regret(scenario_key)
+        
+        result_summary = {
+            'scenario_key': scenario_key,
+            'iterations_completed': iteration_count,
+            'processing_time_seconds': processing_time,
+            'final_regret': final_regret,
+            'stop_reason': stop_reason,
+            'regret_history_length': len(self.scenario_regret_history[scenario_key])
+        }
+        
+        print(f"✅ Completed scenario {scenario_key}: {iteration_count} iterations, "
+              f"{processing_time:.2f}s, final_regret={final_regret:.6f}")
+        
+        return result_summary
+    
+    def calculate_remaining_time_estimate(self):
+        """Calculate estimated remaining training time"""
+        completed_scenarios = len(self.completed_scenarios)
+        
+        if completed_scenarios == 0:
+            return {"estimated_remaining_seconds": None, "estimated_total_seconds": None}
+        
+        # Average time per completed scenario
+        total_completed_time = sum(self.scenario_completion_times.values())
+        avg_time_per_scenario = total_completed_time / completed_scenarios
+        
+        # Estimate remaining time
+        remaining_scenarios = len(self.scenario_list) - self.current_scenario_index
+        estimated_remaining_seconds = remaining_scenarios * avg_time_per_scenario
+        estimated_total_seconds = len(self.scenario_list) * avg_time_per_scenario
+        
+        return {
+            "avg_time_per_scenario": avg_time_per_scenario,
+            "remaining_scenarios": remaining_scenarios,
+            "estimated_remaining_seconds": estimated_remaining_seconds,
+            "estimated_total_seconds": estimated_total_seconds,
+            "completed_scenarios": completed_scenarios
+        }
+    
+    def log_progress_with_estimates(self):
+        """Enhanced logging with time estimates"""
+        time_estimates = self.calculate_remaining_time_estimate()
+        completed = len(self.completed_scenarios)
+        total = len(self.scenario_list)
+        progress_percent = (completed / total) * 100 if total > 0 else 0
+        
+        print(f"\n📊 SEQUENTIAL TRAINING PROGRESS:")
+        print(f"   Completed scenarios: {completed}/{total} ({progress_percent:.1f}%)")
+        
+        if time_estimates["estimated_remaining_seconds"]:
+            remaining_hours = time_estimates["estimated_remaining_seconds"] / 3600
+            total_hours = time_estimates["estimated_total_seconds"] / 3600
+            avg_minutes = time_estimates["avg_time_per_scenario"] / 60
+            
+            print(f"   Average time per scenario: {avg_minutes:.2f} minutes")
+            print(f"   Estimated remaining time: {remaining_hours:.2f} hours")
+            print(f"   Estimated total training time: {total_hours:.2f} hours")
+        
+        # Show iteration distribution
+        if self.scenario_iteration_counts:
+            iterations_list = list(self.scenario_iteration_counts.values())
+            avg_iterations = np.mean(iterations_list)
+            total_iterations = sum(iterations_list)
+            print(f"   Average iterations per scenario: {avg_iterations:.1f}")
+            print(f"   Total iterations completed: {total_iterations:,}")
+    
+    def run_sequential_training(self):
+        """
+        Run the complete sequential training process
+        Process all scenarios in order until each meets its stopping condition
+        """
+        print(f"🚀 Starting Sequential Scenario Training")
+        print(f"📊 Total scenarios to process: {len(self.scenario_list)}")
+        print("=" * 70)
+        
+        # Start performance tracking
+        self.start_performance_tracking()
+        training_start_time = time.time()
+        
+        for idx, scenario in enumerate(self.scenario_list):
+            self.current_scenario_index = idx
+            
+            # Process this scenario until stopping condition
+            result = self.process_single_scenario(scenario)
+            self.completed_scenarios.append(result)
+            
+            # Log progress with estimates
+            if (idx + 1) % max(len(self.scenario_list) // 20, 1) == 0:  # Log every 5% or more frequently
+                self.log_progress_with_estimates()
+        
+        # Final summary
+        training_end_time = time.time()
+        total_training_time = training_end_time - training_start_time
+        
+        print(f"\n🎉 SEQUENTIAL TRAINING COMPLETE!")
+        print(f"⏱️  Total training time: {total_training_time/3600:.2f} hours")
+        print(f"📊 Scenarios processed: {len(self.completed_scenarios)}")
+        
+        # Training completion statistics
+        total_iterations = sum(self.scenario_iteration_counts.values())
+        avg_iterations = np.mean(list(self.scenario_iteration_counts.values())) if self.scenario_iteration_counts else 0
+        
+        print(f"🔢 Total iterations: {total_iterations:,}")
+        print(f"🎯 Average iterations per scenario: {avg_iterations:.1f}")
+        
+        # Stop reasons distribution
+        stop_reasons = [result['stop_reason'] for result in self.completed_scenarios]
+        stop_reason_counts = Counter(stop_reasons)
+        print(f"\n📈 Stopping condition analysis:")
+        for reason, count in stop_reason_counts.items():
+            percentage = (count / len(stop_reasons)) * 100
+            print(f"   {reason}: {count} scenarios ({percentage:.1f}%)")
+        
+        # Export results
+        self.export_strategies_to_csv("sequential_cfr_strategies.csv")
+        self.export_performance_metrics("sequential_performance_metrics.csv")
+        self.export_scenario_completion_report("scenario_completion_report.csv")
+        
+        return self.completed_scenarios
+    
+    def export_scenario_completion_report(self, filename="scenario_completion_report.csv"):
+        """Export detailed report of scenario completion"""
+        if not self.completed_scenarios:
+            print("❌ No scenario completion data to export")
+            return None
+        
+        import pandas as pd
+        
+        print(f"📊 Exporting scenario completion report to {filename}...")
+        
+        # Prepare detailed completion data
+        report_data = []
+        for result in self.completed_scenarios:
+            scenario_key = result['scenario_key']
+            parts = scenario_key.split("|")
+            
+            row = {
+                'scenario_key': scenario_key,
+                'hand_category': parts[0] if len(parts) > 0 else 'unknown',
+                'position': parts[1] if len(parts) > 1 else 'unknown',
+                'stack_category': parts[2] if len(parts) > 2 else 'unknown',
+                'blinds_level': parts[3] if len(parts) > 3 else 'unknown',
+                'iterations_completed': result['iterations_completed'],
+                'processing_time_seconds': result['processing_time_seconds'],
+                'processing_time_minutes': result['processing_time_seconds'] / 60,
+                'final_regret': result['final_regret'],
+                'stop_reason': result['stop_reason'],
+                'regret_history_length': result['regret_history_length']
+            }
+            report_data.append(row)
+        
+        df = pd.DataFrame(report_data)
+        
+        # Sort by processing time descending to see which took longest
+        df = df.sort_values('processing_time_seconds', ascending=False)
+        
+        # Export to CSV
+        df.to_csv(filename, index=False)
+        
+        print(f"✅ Exported completion report for {len(report_data)} scenarios")
+        
+        # Show summary statistics
+        print(f"\n📈 SCENARIO COMPLETION SUMMARY:")
+        print(f"Avg processing time: {df['processing_time_minutes'].mean():.2f} minutes")
+        print(f"Max processing time: {df['processing_time_minutes'].max():.2f} minutes")
+        print(f"Min processing time: {df['processing_time_minutes'].min():.2f} minutes")
+        print(f"Avg iterations per scenario: {df['iterations_completed'].mean():.1f}")
+        print(f"Total training iterations: {df['iterations_completed'].sum():,}")
+        
+        return df
+
+
 if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
@@ -674,5 +977,35 @@ if __name__ == "__main__":
         
         return trainer
     
+    def run_sequential_training_demo(iterations_per_scenario=500, stopping_window=50, 
+                                   regret_threshold=0.01, max_scenarios=5):
+        """Run sequential training demo with configurable parameters"""
+        print(f"🚀 Sequential Training Demo")
+        print(f"Iterations per scenario: {iterations_per_scenario}")
+        print(f"Stopping window: {stopping_window}")
+        print(f"Regret threshold: {regret_threshold}")
+        print(f"Max scenarios: {max_scenarios}")
+        
+        # Generate scenarios
+        from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+        all_scenarios = generate_enhanced_scenarios()
+        
+        # Use only first few scenarios for demo
+        demo_scenarios = all_scenarios[:max_scenarios]
+        
+        # Initialize sequential trainer
+        trainer = SequentialScenarioTrainer(
+            scenarios=demo_scenarios,
+            iterations_per_scenario=iterations_per_scenario,
+            stopping_condition_window=stopping_window,
+            regret_stability_threshold=regret_threshold
+        )
+        
+        # Run training
+        results = trainer.run_sequential_training()
+        
+        return trainer, results
+    
     # Uncomment to run training:
     # trainer = run_enhanced_training()
+    # trainer, results = run_sequential_training_demo()
