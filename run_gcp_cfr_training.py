@@ -38,7 +38,7 @@ class GCPCFRTrainer:
     Production GCP CFR Trainer with balanced scenario sampling and comprehensive logging
     """
     
-    def __init__(self, n_scenarios=5000, n_workers=None, log_interval_minutes=15):
+    def __init__(self, n_workers=None, log_interval_minutes=15):
         self.n_workers = n_workers or mp.cpu_count()
         self.log_interval_minutes = log_interval_minutes
         self.start_time = time.time()
@@ -50,11 +50,11 @@ class GCPCFRTrainer:
         # Setup logging
         self.setup_logging()
         
-        # Initialize scenario pool with balanced sampling
+        # Initialize scenario pool with all possible combinations
         self.logger.info(f"🚀 Initializing GCP CFR Trainer with {self.n_workers} workers")
-        self.logger.info(f"🎯 Generating {n_scenarios} scenarios for balanced training...")
+        self.logger.info(f"🎯 Generating all possible scenario combinations...")
         
-        self.scenarios = generate_enhanced_scenarios(n_scenarios)
+        self.scenarios = generate_enhanced_scenarios()
         self.scenario_training_counts = Counter()
         
         # Shared data structures for multiprocessing
@@ -329,13 +329,13 @@ class GCPCFRTrainer:
         for scenario_key, strategy_counts in self.combined_strategy_sum.items():
             if sum(strategy_counts.values()) > 0:
                 
-                # Parse scenario key  
-                parts = scenario_key.split("_")
+                # Parse scenario key (bet_size_category removed, blinds_level added) 
+                parts = scenario_key.split("|")
                 if len(parts) >= 4:
                     hand_category = parts[0]
                     position = parts[1] 
                     stack_category = parts[2]
-                    bet_size_category = parts[3]
+                    blinds_level = parts[3]
                 else:
                     continue
                 
@@ -373,7 +373,7 @@ class GCPCFRTrainer:
                     'example_hands': example_hands,
                     'position': position,
                     'stack_depth': stack_category,
-                    'bet_size_category': bet_size_category,
+                    'blinds_level': blinds_level,
                     'training_games': training_games,
                     'recommended_action': best_action.upper(),
                     'confidence_percent': round(best_action_confidence, 2),
@@ -516,7 +516,6 @@ def main():
     
     # Initialize trainer with production settings
     trainer = GCPCFRTrainer(
-        n_scenarios=10000,          # Large scenario pool for comprehensive coverage
         n_workers=mp.cpu_count(),   # Use all CPU cores
         log_interval_minutes=15     # Log every 15 minutes as required
     )

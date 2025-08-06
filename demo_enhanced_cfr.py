@@ -16,7 +16,7 @@ def demo_balanced_vs_random_sampling():
     print("🎯 DEMO: Balanced vs Random Sampling")
     print("=" * 50)
     
-    scenarios = generate_enhanced_scenarios(50)
+    scenarios = generate_enhanced_scenarios()
     
     # Test random sampling (old way)
     print("\n📊 OLD METHOD - Random sampling (500 iterations):")
@@ -57,7 +57,7 @@ def demo_enhanced_metrics():
     print(f"\n\n🧠 DEMO: Enhanced Performance Metrics")
     print("=" * 50)
     
-    scenarios = generate_enhanced_scenarios(30)
+    scenarios = generate_enhanced_scenarios()
     trainer = EnhancedCFRTrainer(scenarios=scenarios)
     trainer.start_performance_tracking()
     
@@ -92,12 +92,13 @@ def demo_training_improvements():
     print("=" * 50)
     
     print(f"📊 TRAINING CONFIGURATION CHANGES:")
-    print(f"   Old iterations:     50,000 (1x baseline)")
-    print(f"   New iterations:    200,000 (4x deeper learning)")
-    print(f"   Scenario selection: Random → Balanced stratified sampling")
-    print(f"   Metrics tracking:   Basic → Comprehensive coverage analysis")
-    print(f"   Scenario space:     Unknown → 1,650 total calculated")
-    print(f"   Hand categories:    11 categories with proportional coverage")
+    print(f"   Old approach:       Manual n_scenarios setting (e.g. 1000)")
+    print(f"   New approach:       All possible combinations (330 scenarios)")
+    print(f"   Scenario variables: Removed bet_size_category from keys")
+    print(f"   Opponent betting:   Static → Dynamic during simulation")
+    print(f"   Action mapping:     Fixed → Based on actual bet vs stack ratio")
+    print(f"   Scenario space:     11×2×5×5×3 = 1,650 → 11×2×5×3 = 330")
+    print(f"   Benefits:           Smaller space, more realistic, better generalization")
 
 if __name__ == "__main__":
     print("🚀 ENHANCED CFR TRAINING SYSTEM DEMO")
@@ -110,9 +111,10 @@ if __name__ == "__main__":
     demo_training_improvements()
     
     print(f"\n\n✅ DEMO COMPLETE")
-    print(f"🎯 Key Benefits:")
-    print(f"   • More balanced training across all hand categories")
-    print(f"   • 4x deeper learning (200k vs 50k iterations)")
-    print(f"   • Comprehensive scenario space analysis (1,650 total scenarios)")
-    print(f"   • Enhanced performance tracking with coverage metrics")
-    print(f"   • Better visibility into training progress and balance")
+    print(f"🎯 Key Benefits of Refactoring:")
+    print(f"   • Removed bet_size_category from scenario keys (more realistic)")
+    print(f"   • Generate all 330 possible scenario combinations automatically")
+    print(f"   • Dynamic opponent betting during simulation (robust training)")
+    print(f"   • Action mapping based on actual bet sizes vs stack ratios")
+    print(f"   • Smaller, more focused scenario space (330 vs 1,650)")
+    print(f"   • Better generalization to various opponent bet distributions")
