@@ -1,0 +1,6 @@
+scenario_key,hand_category,example_hands,position,stack_depth,betting_situation,training_games,best_action,confidence,fold_prob,call_prob,raise_small_prob,shove_prob
+premium_pairs_BTN_short_no_bet,premium,,pairs,BTN,short,2,RAISE_SMALL,0.667,0.167,0.0,0.667,0.167
+medium_pairs_BTN_medium_bet,medium,,pairs,BTN,medium,2,RAISE_SMALL,0.625,0.125,0.125,0.625,0.125
+medium_aces_BB_ultra_short_bet,medium,,aces,BB,ultra,2,FOLD,0.5,0.5,0.5,0.0,0.0
+small_pairs_BTN_ultra_short_no_bet,small,,pairs,BTN,ultra,2,FOLD,0.333,0.333,0.0,0.333,0.333
+premium_aces_BB_deep_bet,premium,,aces,BB,deep,2,FOLD,0.25,0.25,0.25,0.25,0.25
