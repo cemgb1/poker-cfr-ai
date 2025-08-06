@@ -1,4 +1,4 @@
 scenario_key,hand_category,example_hands,position,stack_depth,blinds_level,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
-premium_pairs|BTN|ultra_short|medium,premium_pairs,"AA, KK, QQ",BTN,ultra_short,medium,50,FOLD,0.604,0.604,0.0,0.0,0.194,0.059,0.08,0.064
-premium_pairs|BTN|ultra_short|high,premium_pairs,"AA, KK, QQ",BTN,ultra_short,high,100,RAISE_HIGH,0.412,0.072,0.0,0.0,0.07,0.189,0.257,0.412
-premium_pairs|BTN|ultra_short|low,premium_pairs,"AA, KK, QQ",BTN,ultra_short,low,100,RAISE_HIGH,0.397,0.082,0.0,0.0,0.103,0.172,0.246,0.397
+premium_pairs|BTN|ultra_short|medium,premium_pairs,"AA, KK, QQ",BTN,ultra_short,medium,250,RAISE_HIGH,0.367,0.099,0.0,0.0,0.099,0.148,0.287,0.367
+premium_pairs|BTN|ultra_short|low,premium_pairs,"AA, KK, QQ",BTN,ultra_short,low,150,RAISE_HIGH,0.358,0.062,0.0,0.0,0.116,0.149,0.315,0.358
+premium_pairs|BTN|ultra_short|high,premium_pairs,"AA, KK, QQ",BTN,ultra_short,high,250,CALL_HIGH,0.351,0.313,0.0,0.0,0.351,0.112,0.112,0.112

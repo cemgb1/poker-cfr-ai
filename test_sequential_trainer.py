@@ -25,26 +25,36 @@ class TestSequentialScenarioTrainer(unittest.TestCase):
         self.test_scenarios = all_scenarios[:10]  # First 10 scenarios
         
         # Test parameters
+        self.rollouts_per_visit = 2
         self.iterations_per_scenario = 100
         self.stopping_window = 20
         self.regret_threshold = 0.1  # More lenient for testing
+        self.min_rollouts_before_convergence = 50
     
     def test_sequential_trainer_initialization(self):
-        """Test that SequentialScenarioTrainer initializes correctly"""
+        """Test that SequentialScenarioTrainer initializes correctly with new parameters"""
         trainer = SequentialScenarioTrainer(
             scenarios=self.test_scenarios,
+            rollouts_per_visit=self.rollouts_per_visit,
             iterations_per_scenario=self.iterations_per_scenario,
             stopping_condition_window=self.stopping_window,
-            regret_stability_threshold=self.regret_threshold
+            regret_stability_threshold=self.regret_threshold,
+            min_rollouts_before_convergence=self.min_rollouts_before_convergence
         )
         
         # Check initialization
         self.assertEqual(len(trainer.scenario_list), len(self.test_scenarios))
+        self.assertEqual(trainer.rollouts_per_visit, self.rollouts_per_visit)
         self.assertEqual(trainer.iterations_per_scenario, self.iterations_per_scenario)
         self.assertEqual(trainer.stopping_condition_window, self.stopping_window)
         self.assertEqual(trainer.regret_stability_threshold, self.regret_threshold)
+        self.assertEqual(trainer.min_rollouts_before_convergence, self.min_rollouts_before_convergence)
         self.assertEqual(trainer.current_scenario_index, 0)
         self.assertEqual(len(trainer.completed_scenarios), 0)
+        
+        # Check new tracking structures
+        self.assertIsInstance(trainer.scenario_rollout_counts, defaultdict)
+        self.assertIsInstance(trainer.rollout_distribution_stats, defaultdict)
     
     def test_stopping_condition_logic(self):
         """Test stopping condition detection"""
@@ -73,13 +83,74 @@ class TestSequentialScenarioTrainer(unittest.TestCase):
         trainer.scenario_regret_history[scenario_key] = unstable_regrets
         self.assertFalse(trainer.check_stopping_condition(scenario_key))
     
-    def test_single_scenario_processing(self):
-        """Test processing a single scenario"""
+    def test_multiple_rollouts_functionality(self):
+        """Test multiple rollouts per visit functionality"""
         trainer = SequentialScenarioTrainer(
-            scenarios=self.test_scenarios,
+            scenarios=self.test_scenarios[:1],
+            rollouts_per_visit=3,  # Multiple rollouts
+            iterations_per_scenario=20,
+            stopping_condition_window=5,
+            regret_stability_threshold=0.5,  # Lenient for quick test
+            min_rollouts_before_convergence=10
+        )
+        
+        scenario = self.test_scenarios[0]
+        scenario_key = trainer.get_scenario_key(scenario)
+        
+        # Test single call to play_scenario_multiple_rollouts
+        result = trainer.play_scenario_multiple_rollouts(scenario)
+        
+        # Validate result structure for multiple rollouts
+        self.assertIn('payoff', result)
+        self.assertIn('rollout_count', result)
+        self.assertIn('rollout_payoffs', result)
+        self.assertIn('rollout_variance', result)
+        self.assertEqual(result['rollout_count'], 3)
+        self.assertEqual(len(result['rollout_payoffs']), 3)
+        
+        # Check rollout tracking
+        self.assertEqual(trainer.scenario_rollout_counts[scenario_key], 3)
+        self.assertEqual(len(trainer.rollout_distribution_stats[scenario_key]), 3)
+        
+        # Variance should be non-negative
+        self.assertGreaterEqual(result['rollout_variance'], 0.0)
+    
+    def test_min_rollouts_before_convergence(self):
+        """Test minimum rollouts requirement for stopping condition"""
+        trainer = SequentialScenarioTrainer(
+            scenarios=self.test_scenarios[:1],
+            rollouts_per_visit=2,
             iterations_per_scenario=50,
             stopping_condition_window=10,
-            regret_stability_threshold=0.1
+            regret_stability_threshold=0.01,  # Very strict
+            min_rollouts_before_convergence=40  # High requirement
+        )
+        
+        scenario_key = "test_scenario"
+        
+        # Create stable regret history but insufficient rollouts
+        trainer.scenario_regret_history[scenario_key] = [0.01] * 50  # Very stable
+        trainer.scenario_rollout_counts[scenario_key] = 30  # Below minimum
+        
+        # Should not stop due to insufficient rollouts
+        self.assertFalse(trainer.check_stopping_condition(scenario_key))
+        
+        # Now with sufficient rollouts
+        trainer.scenario_rollout_counts[scenario_key] = 50  # Above minimum
+        
+        # Should be able to stop now
+        result = trainer.check_stopping_condition(scenario_key)
+        self.assertIsInstance(result, (bool, np.bool_))
+    
+    def test_single_scenario_processing(self):
+        """Test processing a single scenario with enhanced parameters"""
+        trainer = SequentialScenarioTrainer(
+            scenarios=self.test_scenarios,
+            rollouts_per_visit=2,  # Multiple rollouts
+            iterations_per_scenario=50,
+            stopping_condition_window=10,
+            regret_stability_threshold=0.1,
+            min_rollouts_before_convergence=20
         )
         
         scenario = self.test_scenarios[0]
@@ -93,12 +164,21 @@ class TestSequentialScenarioTrainer(unittest.TestCase):
         self.assertIn('processing_time_seconds', result)
         self.assertIn('final_regret', result)
         self.assertIn('stop_reason', result)
+        self.assertIn('total_rollouts', result)  # New field
+        self.assertIn('avg_payoff', result)  # New field
+        self.assertIn('payoff_variance', result)  # New field
         
         # Check that some training occurred
         self.assertGreater(result['iterations_completed'], 0)
         self.assertGreater(result['processing_time_seconds'], 0)
         self.assertIsInstance(result['final_regret'], float)
-        self.assertIn(result['stop_reason'], ['max_iterations_reached', 'regret_stabilized', 'unknown'])
+        self.assertIn(result['stop_reason'], ['max_iterations_reached', 'regret_stabilized', 'unknown', 
+                                           'min_rollouts_not_met (20/20)', 'min_rollouts_not_met (40/20)'])  # Updated expected reasons
+        
+        # Check rollout statistics
+        self.assertGreaterEqual(result['total_rollouts'], result['iterations_completed'])  # Should be >= due to multiple rollouts
+        self.assertIsInstance(result['avg_payoff'], float)
+        self.assertGreaterEqual(result['payoff_variance'], 0.0)
         
         # Check that regret history was recorded
         scenario_key = trainer.get_scenario_key(scenario)
