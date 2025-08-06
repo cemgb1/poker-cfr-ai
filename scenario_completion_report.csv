@@ -1,6 +1,3 @@
-scenario_key,hand_category,position,stack_category,blinds_level,iterations_completed,processing_time_seconds,processing_time_minutes,final_regret,stop_reason,regret_history_length
-premium_pairs|BTN|ultra_short|low,premium_pairs,BTN,ultra_short,low,150,34.37964415550232,0.572994069258372,102.77000000000012,regret_stabilized,150
-premium_pairs|BTN|short|low,premium_pairs,BTN,short,low,100,22.97209072113037,0.3828681786855062,16.567499999999985,regret_stabilized,100
-premium_pairs|BTN|ultra_short|medium,premium_pairs,BTN,ultra_short,medium,100,22.917389631271362,0.3819564938545227,69.24999999999996,regret_stabilized,100
-premium_pairs|BTN|ultra_short|high,premium_pairs,BTN,ultra_short,high,50,11.485461473464966,0.19142435789108275,34.31636363636362,regret_stabilized,50
-premium_pairs|BTN|short|medium,premium_pairs,BTN,short,medium,50,11.403235673904419,0.19005392789840697,12.37916666666667,regret_stabilized,50
+scenario_key,hand_category,position,stack_category,blinds_level,iterations_completed,processing_time_seconds,processing_time_minutes,final_regret,stop_reason,regret_history_length,total_rollouts,avg_payoff,payoff_variance,payoff_min,payoff_max
+premium_pairs|BTN|ultra_short|medium,premium_pairs,BTN,ultra_short,medium,150,68.26685237884521,1.1377808729807535,194.2025000000007,regret_stabilized,150,300,1.9704166666666667,24.979801909722223,-8.0,8.375
+premium_pairs|BTN|ultra_short|low,premium_pairs,BTN,ultra_short,low,150,66.14283585548401,1.1023805975914,102.35181818181823,regret_stabilized,150,300,0.015151515151514966,27.595224977043156,-8.0,6.909090909090908

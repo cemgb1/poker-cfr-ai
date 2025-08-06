@@ -1,11 +1,13 @@
 # enhanced_cfr_trainer_v2.py - CFR training with dynamic opponent betting
 
 """
-Enhanced CFR Trainer for Preflop Poker
+Enhanced CFR Trainer for Preflop Poker with Sequential Training Support
 
-This module trains CFR strategies using scenarios WITHOUT bet_size_category as a fixed variable.
-Instead, opponent bet sizes are randomized during each training iteration, and the agent
-learns to generalize across different bet size distributions.
+This module provides advanced CFR training capabilities including:
+1. Enhanced CFR training with dynamic opponent betting
+2. Sequential scenario training with multiple rollouts per visit
+3. Configurable stopping conditions and convergence checking
+4. Comprehensive performance tracking and statistics
 
 Key Features:
 - Scenario keys: hand_category|position|stack_category|blinds_level (no bet_size_category)
@@ -13,13 +15,27 @@ Key Features:
 - Action mapping: call/raise buckets determined by actual bet size vs stack ratio
 - Robust learning: Model learns strategies across varied opponent bet distributions
 - Balanced sampling: Ensures proportional coverage across hand categories
+- Sequential training: Process scenarios in order with multiple rollouts per visit
+- Advanced stopping conditions: Minimum rollouts requirement + regret stabilization
 
-Training Process:
+Training Process (Enhanced CFR):
 1. Select scenario from deterministic set of 330 combinations
 2. Generate dynamic betting context (opponent action, bet size)
 3. Map available actions based on actual bet size vs stack
 4. Apply CFR regret matching for strategy selection
 5. Update regrets for counterfactual actions
+
+Sequential Training Process:
+1. Process scenarios sequentially (not randomly)
+2. For each scenario iteration, perform multiple rollouts with different random contexts
+3. Average returns from multiple rollouts for regret updates
+4. Check convergence using moving average regret change over configurable window
+5. Allow early stopping only after minimum rollouts completed
+6. Comprehensive logging with rollout distribution statistics
+
+Classes:
+- EnhancedCFRTrainer: Base CFR trainer with balanced sampling and dynamic betting
+- SequentialScenarioTrainer: Enhanced trainer with sequential processing and multiple rollouts
 """
 
 from enhanced_cfr_preflop_generator_v2 import (
@@ -622,22 +638,27 @@ class EnhancedCFRTrainer:
 class SequentialScenarioTrainer(EnhancedCFRTrainer):
     """
     Sequential Scenario Trainer - processes scenarios sequentially with stopping conditions
+    and multiple rollouts per visit
     
     Key differences from EnhancedCFRTrainer:
     1. Processes scenarios sequentially from a pre-generated list
     2. Runs fixed iterations (X) per scenario until stopping condition (Y) is met
     3. Stopping condition based on average regret stabilization
-    4. Enhanced logging with time estimates and remaining iterations
+    4. Multiple random rollouts per scenario visit with averaged returns
+    5. Enhanced logging with time estimates and rollout statistics
     """
     
-    def __init__(self, scenarios=None, iterations_per_scenario=1000, 
-                 stopping_condition_window=100, regret_stability_threshold=0.001):
+    def __init__(self, scenarios=None, rollouts_per_visit=1, iterations_per_scenario=1000, 
+                 stopping_condition_window=20, regret_stability_threshold=0.05,
+                 min_rollouts_before_convergence=100):
         super().__init__(scenarios)
         
         # Sequential training parameters
+        self.rollouts_per_visit = rollouts_per_visit
         self.iterations_per_scenario = iterations_per_scenario
         self.stopping_condition_window = stopping_condition_window
         self.regret_stability_threshold = regret_stability_threshold
+        self.min_rollouts_before_convergence = min_rollouts_before_convergence
         
         # Create scenario list for sequential processing
         self.scenario_list = list(self.scenarios)
@@ -648,19 +669,30 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         self.scenario_regret_history = defaultdict(list)  # Track regret history per scenario
         self.scenario_completion_times = {}
         self.scenario_iteration_counts = defaultdict(int)
+        self.scenario_rollout_counts = defaultdict(int)  # Track total rollouts per scenario
+        self.rollout_distribution_stats = defaultdict(list)  # Track rollout outcomes
         
         print(f"🎯 Sequential Scenario Trainer Initialized!")
         print(f"📊 Total scenarios to process: {len(self.scenario_list)}")
+        print(f"🎲 Rollouts per visit: {self.rollouts_per_visit}")
         print(f"🔄 Iterations per scenario: {self.iterations_per_scenario}")
         print(f"🛑 Stopping condition window: {self.stopping_condition_window} iterations")
         print(f"📈 Regret stability threshold: {self.regret_stability_threshold}")
+        print(f"🎯 Min rollouts before convergence: {self.min_rollouts_before_convergence}")
     
     def check_stopping_condition(self, scenario_key):
         """
         Check if stopping condition is met for the current scenario
-        Returns True if average regret has stabilized over the window
+        Returns True if:
+        1. Minimum rollouts completed AND
+        2. Average regret has stabilized over the window
         """
         regret_history = self.scenario_regret_history[scenario_key]
+        total_rollouts = self.scenario_rollout_counts[scenario_key]
+        
+        # First check: minimum rollouts completed
+        if total_rollouts < self.min_rollouts_before_convergence:
+            return False
         
         # Need at least window size + buffer for meaningful comparison
         if len(regret_history) < self.stopping_condition_window + 20:
@@ -700,10 +732,49 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         avg_regret = total_regret / len(scenario_regrets)
         return avg_regret
     
+    def play_scenario_multiple_rollouts(self, scenario):
+        """
+        Play scenario with multiple rollouts per visit and average the results
+        Returns aggregated result from all rollouts for regret updates
+        """
+        scenario_key = self.get_scenario_key(scenario)
+        rollout_results = []
+        
+        # Perform multiple rollouts with different random contexts
+        for rollout_idx in range(self.rollouts_per_visit):
+            # Each rollout uses different random seed contexts for:
+            # - Dynamic betting context generation
+            # - Villain hand generation  
+            # - Action sampling
+            result = self.play_enhanced_scenario(scenario)
+            rollout_results.append(result)
+            
+            # Track individual rollout for statistics
+            self.scenario_rollout_counts[scenario_key] += 1
+            self.rollout_distribution_stats[scenario_key].append(result['payoff'])
+        
+        # Average the payoffs and other results across rollouts
+        avg_payoff = np.mean([r['payoff'] for r in rollout_results])
+        avg_hero_stack_after = np.mean([r['hero_stack_after'] for r in rollout_results])
+        total_busted = sum([r['busted'] for r in rollout_results])
+        
+        # Use the last rollout's context info but averaged payoffs
+        aggregated_result = rollout_results[-1].copy()  
+        aggregated_result.update({
+            'payoff': avg_payoff,
+            'hero_stack_after': avg_hero_stack_after,
+            'busted': total_busted > 0,  # True if any rollout resulted in bust
+            'rollout_count': self.rollouts_per_visit,
+            'rollout_payoffs': [r['payoff'] for r in rollout_results],
+            'rollout_variance': np.var([r['payoff'] for r in rollout_results]) if len(rollout_results) > 1 else 0.0
+        })
+        
+        return aggregated_result
+    
     def process_single_scenario(self, scenario, max_iterations=None):
         """
-        Process a single scenario with fixed iterations until stopping condition
-        Returns dict with processing results
+        Process a single scenario with multiple rollouts per visit until stopping condition
+        Returns dict with processing results including rollout statistics
         """
         scenario_key = self.get_scenario_key(scenario)
         start_time = time.time()
@@ -713,10 +784,18 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         print(f"\n🎯 Processing scenario: {scenario_key}")
         print(f"   Hand: {scenario['hand_category']}, Position: {scenario['hero_position']}, "
               f"Stack: {scenario['stack_category']}, Blinds: {scenario['blinds_level']}")
+        print(f"   Rollouts per visit: {self.rollouts_per_visit}")
         
         while iteration_count < max_iter:
-            # Run one training iteration for this scenario
-            result = self.play_enhanced_scenario(scenario)
+            # Run multiple rollouts for this scenario iteration
+            if self.rollouts_per_visit == 1:
+                # Use single rollout for backward compatibility and performance
+                result = self.play_enhanced_scenario(scenario)
+                self.scenario_rollout_counts[scenario_key] += 1
+            else:
+                # Use multiple rollouts per visit
+                result = self.play_scenario_multiple_rollouts(scenario)
+            
             self.scenario_counter[scenario_key] += 1
             iteration_count += 1
             
@@ -727,13 +806,17 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
             # Check stopping condition every batch of iterations
             if iteration_count >= self.stopping_condition_window and iteration_count % 50 == 0:
                 if self.check_stopping_condition(scenario_key):
+                    total_rollouts = self.scenario_rollout_counts[scenario_key]
                     print(f"✅ Stopping condition met after {iteration_count} iterations "
-                          f"(regret stabilized: {current_regret:.6f})")
+                          f"({total_rollouts} total rollouts, regret stabilized: {current_regret:.6f})")
                     break
             
             # Progress logging every certain iterations
             if iteration_count % max(self.iterations_per_scenario // 4, 100) == 0:
-                print(f"   Iteration {iteration_count:4d}: regret={current_regret:.6f}")
+                total_rollouts = self.scenario_rollout_counts[scenario_key]
+                rollout_variance = np.var(self.rollout_distribution_stats[scenario_key]) if len(self.rollout_distribution_stats[scenario_key]) > 1 else 0.0
+                print(f"   Iteration {iteration_count:4d}: regret={current_regret:.6f}, "
+                      f"rollouts={total_rollouts}, payoff_var={rollout_variance:.4f}")
         
         # Record completion
         end_time = time.time()
@@ -742,8 +825,11 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         self.scenario_iteration_counts[scenario_key] = iteration_count
         
         # Determine why processing stopped
+        total_rollouts = self.scenario_rollout_counts[scenario_key]
         if iteration_count >= max_iter:
             stop_reason = "max_iterations_reached"
+        elif total_rollouts < self.min_rollouts_before_convergence:
+            stop_reason = f"min_rollouts_not_met ({total_rollouts}/{self.min_rollouts_before_convergence})"
         elif self.check_stopping_condition(scenario_key):
             stop_reason = "regret_stabilized"
         else:
@@ -751,16 +837,27 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         
         final_regret = self.get_current_scenario_regret(scenario_key)
         
+        # Calculate rollout statistics
+        rollout_payoffs = self.rollout_distribution_stats[scenario_key]
+        rollout_stats = {
+            'total_rollouts': total_rollouts,
+            'avg_payoff': np.mean(rollout_payoffs) if rollout_payoffs else 0.0,
+            'payoff_variance': np.var(rollout_payoffs) if len(rollout_payoffs) > 1 else 0.0,
+            'payoff_min': min(rollout_payoffs) if rollout_payoffs else 0.0,
+            'payoff_max': max(rollout_payoffs) if rollout_payoffs else 0.0
+        }
+        
         result_summary = {
             'scenario_key': scenario_key,
             'iterations_completed': iteration_count,
             'processing_time_seconds': processing_time,
             'final_regret': final_regret,
             'stop_reason': stop_reason,
-            'regret_history_length': len(self.scenario_regret_history[scenario_key])
+            'regret_history_length': len(self.scenario_regret_history[scenario_key]),
+            **rollout_stats
         }
         
-        print(f"✅ Completed scenario {scenario_key}: {iteration_count} iterations, "
+        print(f"✅ Completed scenario {scenario_key}: {iteration_count} iterations, {total_rollouts} rollouts, "
               f"{processing_time:.2f}s, final_regret={final_regret:.6f}")
         
         return result_summary
@@ -790,7 +887,7 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         }
     
     def log_progress_with_estimates(self):
-        """Enhanced logging with time estimates"""
+        """Enhanced logging with time estimates and rollout statistics"""
         time_estimates = self.calculate_remaining_time_estimate()
         completed = len(self.completed_scenarios)
         total = len(self.scenario_list)
@@ -808,13 +905,34 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
             print(f"   Estimated remaining time: {remaining_hours:.2f} hours")
             print(f"   Estimated total training time: {total_hours:.2f} hours")
         
-        # Show iteration distribution
+        # Show iteration and rollout distribution
         if self.scenario_iteration_counts:
             iterations_list = list(self.scenario_iteration_counts.values())
             avg_iterations = np.mean(iterations_list)
             total_iterations = sum(iterations_list)
             print(f"   Average iterations per scenario: {avg_iterations:.1f}")
             print(f"   Total iterations completed: {total_iterations:,}")
+            
+        # Show rollout statistics
+        if self.scenario_rollout_counts:
+            rollouts_list = list(self.scenario_rollout_counts.values())
+            total_rollouts = sum(rollouts_list)
+            avg_rollouts = np.mean(rollouts_list)
+            print(f"   Total rollouts completed: {total_rollouts:,}")
+            print(f"   Average rollouts per scenario: {avg_rollouts:.1f}")
+            
+            # Show rollout payoff variance statistics
+            if self.rollout_distribution_stats:
+                all_payoffs = []
+                scenario_variances = []
+                for scenario_payoffs in self.rollout_distribution_stats.values():
+                    if len(scenario_payoffs) > 1:
+                        scenario_variances.append(np.var(scenario_payoffs))
+                        all_payoffs.extend(scenario_payoffs)
+                
+                if scenario_variances:
+                    avg_variance = np.mean(scenario_variances)
+                    print(f"   Average payoff variance per scenario: {avg_variance:.4f}")
     
     def run_sequential_training(self):
         """
@@ -850,10 +968,29 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         
         # Training completion statistics
         total_iterations = sum(self.scenario_iteration_counts.values())
+        total_rollouts = sum(self.scenario_rollout_counts.values()) if self.scenario_rollout_counts else total_iterations
         avg_iterations = np.mean(list(self.scenario_iteration_counts.values())) if self.scenario_iteration_counts else 0
+        avg_rollouts_per_scenario = np.mean(list(self.scenario_rollout_counts.values())) if self.scenario_rollout_counts else 0
         
         print(f"🔢 Total iterations: {total_iterations:,}")
+        print(f"🎲 Total rollouts: {total_rollouts:,}")
         print(f"🎯 Average iterations per scenario: {avg_iterations:.1f}")
+        print(f"🎰 Average rollouts per scenario: {avg_rollouts_per_scenario:.1f}")
+        print(f"📊 Rollouts per visit configuration: {self.rollouts_per_visit}")
+        
+        # Rollout variance analysis
+        if self.rollout_distribution_stats and self.rollouts_per_visit > 1:
+            print(f"\n🎲 ROLLOUT VARIANCE ANALYSIS:")
+            scenario_variances = []
+            for scenario_key, payoffs in self.rollout_distribution_stats.items():
+                if len(payoffs) > 1:
+                    variance = np.var(payoffs)
+                    scenario_variances.append(variance)
+            
+            if scenario_variances:
+                print(f"   Average payoff variance: {np.mean(scenario_variances):.4f}")
+                print(f"   Min variance: {min(scenario_variances):.4f}")
+                print(f"   Max variance: {max(scenario_variances):.4f}")
         
         # Stop reasons distribution
         stop_reasons = [result['stop_reason'] for result in self.completed_scenarios]
@@ -897,7 +1034,13 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
                 'processing_time_minutes': result['processing_time_seconds'] / 60,
                 'final_regret': result['final_regret'],
                 'stop_reason': result['stop_reason'],
-                'regret_history_length': result['regret_history_length']
+                'regret_history_length': result['regret_history_length'],
+                # Add rollout statistics
+                'total_rollouts': result.get('total_rollouts', result['iterations_completed']),
+                'avg_payoff': result.get('avg_payoff', 0.0),
+                'payoff_variance': result.get('payoff_variance', 0.0),
+                'payoff_min': result.get('payoff_min', 0.0),
+                'payoff_max': result.get('payoff_max', 0.0)
             }
             report_data.append(row)
         
@@ -918,6 +1061,11 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         print(f"Min processing time: {df['processing_time_minutes'].min():.2f} minutes")
         print(f"Avg iterations per scenario: {df['iterations_completed'].mean():.1f}")
         print(f"Total training iterations: {df['iterations_completed'].sum():,}")
+        print(f"Avg rollouts per scenario: {df['total_rollouts'].mean():.1f}")
+        print(f"Total training rollouts: {df['total_rollouts'].sum():,}")
+        
+        if self.rollouts_per_visit > 1:
+            print(f"Avg payoff variance: {df['payoff_variance'].mean():.4f}")
         
         return df
 
@@ -978,12 +1126,15 @@ if __name__ == "__main__":
         return trainer
     
     def run_sequential_training_demo(iterations_per_scenario=500, stopping_window=50, 
-                                   regret_threshold=0.01, max_scenarios=5):
+                                   regret_threshold=0.01, max_scenarios=5, rollouts_per_visit=1,
+                                   min_rollouts_before_convergence=100):
         """Run sequential training demo with configurable parameters"""
         print(f"🚀 Sequential Training Demo")
         print(f"Iterations per scenario: {iterations_per_scenario}")
+        print(f"Rollouts per visit: {rollouts_per_visit}")
         print(f"Stopping window: {stopping_window}")
         print(f"Regret threshold: {regret_threshold}")
+        print(f"Min rollouts before convergence: {min_rollouts_before_convergence}")
         print(f"Max scenarios: {max_scenarios}")
         
         # Generate scenarios
@@ -996,9 +1147,11 @@ if __name__ == "__main__":
         # Initialize sequential trainer
         trainer = SequentialScenarioTrainer(
             scenarios=demo_scenarios,
+            rollouts_per_visit=rollouts_per_visit,
             iterations_per_scenario=iterations_per_scenario,
             stopping_condition_window=stopping_window,
-            regret_stability_threshold=regret_threshold
+            regret_stability_threshold=regret_threshold,
+            min_rollouts_before_convergence=min_rollouts_before_convergence
         )
         
         # Run training
