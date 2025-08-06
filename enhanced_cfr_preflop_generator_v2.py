@@ -32,24 +32,21 @@ STACK_CATEGORIES = {
 # TOURNAMENT STAGES
 TOURNAMENT_STAGES = ["early", "middle", "late", "bubble"]
 
-# ENHANCED ACTION SET - Updated to match specification
+# SIMPLIFIED ACTION SET - As per requirement specification
 ACTIONS = {
     "fold": 0,
-    "call_small": 1,    # Call ≤15% of stack  
-    "call_mid": 2,      # Call 15-30% of stack
-    "call_high": 3,     # Call >30% of stack
-    "raise_small": 4,   # Raise 2-2.5x
-    "raise_mid": 5,     # Raise 2.5-3x  
-    "raise_high": 6     # Raise 3x+ or all-in
+    "call": 1,          # Call any bet
+    "raise_small": 2,   # Small raise (2-3x)
+    "shove": 3         # All-in
 }
 
 def generate_enhanced_scenarios(n_scenarios=1000):
-    """Generate stack-aware CFR scenarios with tournament context"""
+    """Generate simplified CFR scenarios with stack context"""
     scenarios = []
     hand_categories = list(PREFLOP_HAND_RANGES.keys())
     
-    print(f"🎯 Generating {n_scenarios} enhanced CFR scenarios...")
-    print(f"🏆 Features: Stack sizes, bet sizing, tournament survival")
+    print(f"🎯 Generating {n_scenarios} simplified CFR scenarios...")
+    print(f"🏆 Features: Stack sizes, heads-up play")
     
     # Distribute across categories and stack sizes
     scenarios_per_category = n_scenarios // len(hand_categories)
@@ -68,9 +65,9 @@ def generate_enhanced_scenarios(n_scenarios=1000):
                 scenarios.append(scenario)
                 scenario_id += 1
     
-    print(f"🏆 Generated {len(scenarios)} enhanced scenarios")
+    print(f"🏆 Generated {len(scenarios)} simplified scenarios")
     
-    # Show enhanced distribution
+    # Show simplified distribution
     analyze_scenario_distribution(scenarios)
     
     # Display scenario space analysis
@@ -82,20 +79,18 @@ def analyze_scenario_space():
     """Analyze and display total possible scenario combinations"""
     print(f"\n🧠 SCENARIO SPACE ANALYSIS:")
     
-    # Calculate theoretical maximum scenarios
+    # Calculate theoretical maximum scenarios (simplified)
     hand_categories = len(PREFLOP_HAND_RANGES)
     positions = 2  # BTN, BB
     stack_categories = len(STACK_CATEGORIES)  
-    bet_size_categories = 5  # no_bet, tiny, small, large, huge
-    blinds_levels = 3  # low, medium, high
+    betting_situations = 2  # no_bet, has_bet
     
-    total_possible = hand_categories * positions * stack_categories * bet_size_categories * blinds_levels
+    total_possible = hand_categories * positions * stack_categories * betting_situations
     
     print(f"Hand categories: {hand_categories}")
     print(f"Positions: {positions} (BTN, BB)")
     print(f"Stack categories: {stack_categories} ({list(STACK_CATEGORIES.keys())})")
-    print(f"Bet size categories: {bet_size_categories} (no_bet, tiny, small, large, huge)")
-    print(f"Blinds levels: {blinds_levels} (low, medium, high)")
+    print(f"Betting situations: {betting_situations} (no_bet, has_bet)")
     print(f"")
     print(f"🎯 THEORETICAL MAXIMUM SCENARIOS: {total_possible:,}")
     print(f"   This represents the complete scenario space that CFR can explore")
@@ -120,13 +115,10 @@ def create_enhanced_scenario(scenario_id, hand_category):
         # Generate opponent's action and bet size
         opponent_action, bet_to_call_bb = generate_opponent_betting(hero_stack_bb, hero_position)
         
-        # Calculate bet sizing context
-        bet_size_category = get_bet_size_category(bet_to_call_bb, hero_stack_bb)
+        # Calculate pot odds
         pot_odds = calculate_pot_odds(bet_to_call_bb, hero_position)
         
-        # Tournament context - removed tournament_stage parameter
-        
-        # Create enhanced scenario
+        # Create simplified scenario (removed bet_size_category and tournament context)
         scenario = {
             "scenario_id": scenario_id,
             "hand_category": hand_category,
@@ -135,19 +127,15 @@ def create_enhanced_scenario(scenario_id, hand_category):
             "hero_position": hero_position,
             "villain_position": "BB" if hero_position == "BTN" else "BTN",
             
-            # Enhanced stack context
+            # Stack context
             "hero_stack_bb": hero_stack_bb,
             "stack_category": stack_category,
             "villain_stack_bb": random.randint(min_stack, max_stack),  # Similar stack
             
-            # Enhanced betting context
+            # Betting context (simplified - removed bet_size_category)
             "opponent_action": opponent_action,
             "bet_to_call_bb": bet_to_call_bb,
-            "bet_size_category": bet_size_category,
             "pot_odds": round(pot_odds, 2),
-            
-            # Tournament context - removed tournament_stage
-            "blinds_level": random.choice(["low", "medium", "high"]),
             
             # Available actions for this scenario
             "available_actions": get_available_actions(hero_stack_bb, bet_to_call_bb)
@@ -183,21 +171,6 @@ def generate_opponent_betting(hero_stack_bb, hero_position):
                 raise_size = random.choice([2, 3, 4, 5])
             return "raise", raise_size
 
-def get_bet_size_category(bet_to_call, stack_size):
-    """Categorize bet size relative to stack"""
-    if bet_to_call == 0:
-        return "no_bet"
-    
-    bet_ratio = bet_to_call / stack_size
-    
-    if bet_ratio <= 0.1:
-        return "tiny"
-    elif bet_ratio <= 0.3:
-        return "small"
-    elif bet_ratio <= 0.6:
-        return "large"
-    else:
-        return "huge"
 
 def calculate_pot_odds(bet_to_call, position):
     """Calculate pot odds for the call"""
@@ -214,27 +187,23 @@ def calculate_pot_odds(bet_to_call, position):
     return pot_size / bet_to_call if bet_to_call > 0 else 0
 
 def get_available_actions(stack_bb, bet_to_call):
-    """Get available actions based on stack size and bet"""
+    """Get available actions based on stack size and bet - simplified action set"""
     actions = ["fold"]
     
     if bet_to_call == 0:
         # No bet to call - can only raise (no checking in this preflop model)
-        actions.extend(["raise_small", "raise_mid", "raise_high"])
+        actions.extend(["raise_small", "shove"])
     else:
-        # Bet to call - categorize call size based on stack percentage
-        bet_ratio = bet_to_call / stack_bb
-        
-        # Add appropriate call actions based on bet size
-        if bet_ratio <= 0.15:
-            actions.append("call_small")
-        elif bet_ratio <= 0.30:
-            actions.append("call_mid") 
-        else:
-            actions.append("call_high")
+        # Bet to call - always can call
+        actions.append("call")
         
         # Add raise options if stack allows
         if stack_bb > bet_to_call + 3:  # Must have chips left for meaningful raise
-            actions.extend(["raise_small", "raise_mid", "raise_high"])
+            actions.append("raise_small")
+        
+        # Can always shove if we have chips
+        if stack_bb > bet_to_call:
+            actions.append("shove")
     
     return actions
 
@@ -341,8 +310,8 @@ def calculate_final_pot_size(hero_action, villain_action, base_bet):
     return pot
 
 def analyze_scenario_distribution(scenarios):
-    """Analyze enhanced scenario distribution"""
-    print(f"\n📊 ENHANCED SCENARIO DISTRIBUTION:")
+    """Analyze simplified scenario distribution"""
+    print(f"\n📊 SIMPLIFIED SCENARIO DISTRIBUTION:")
     
     # Stack categories
     stack_counts = Counter(s['stack_category'] for s in scenarios)
@@ -351,17 +320,11 @@ def analyze_scenario_distribution(scenarios):
         avg_stack = np.mean([s['hero_stack_bb'] for s in scenarios if s['stack_category'] == stack_cat])
         print(f"  {stack_cat:12s}: {count:3d} scenarios (avg: {avg_stack:.1f}bb)")
     
-    # Bet sizing
-    bet_size_counts = Counter(s['bet_size_category'] for s in scenarios)
-    print(f"\nBet Size Categories:")
-    for bet_cat, count in bet_size_counts.most_common():
-        print(f"  {bet_cat:8s}: {count:3d} scenarios")
-    
-    # Tournament stages - removed from distribution analysis
-    # tournament_counts = Counter(s['tournament_stage'] for s in scenarios)
-    # print(f"\nTournament Stages:")
-    # for stage, count in tournament_counts.most_common():
-    #     print(f"  {stage:8s}: {count:3d} scenarios")
+    # Betting situations (simplified)
+    betting_counts = Counter("has_bet" if s['bet_to_call_bb'] > 0 else "no_bet" for s in scenarios)
+    print(f"\nBetting Situations:")
+    for bet_situation, count in betting_counts.most_common():
+        print(f"  {bet_situation:8s}: {count:3d} scenarios")
     
     # Available actions variety
     action_variety = set()
