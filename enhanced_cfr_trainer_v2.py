@@ -1,4 +1,26 @@
-# enhanced_cfr_trainer_v2.py - Tournament-aware CFR with stack survival
+# enhanced_cfr_trainer_v2.py - CFR training with dynamic opponent betting
+
+"""
+Enhanced CFR Trainer for Preflop Poker
+
+This module trains CFR strategies using scenarios WITHOUT bet_size_category as a fixed variable.
+Instead, opponent bet sizes are randomized during each training iteration, and the agent
+learns to generalize across different bet size distributions.
+
+Key Features:
+- Scenario keys: hand_category|position|stack_category|blinds_level (no bet_size_category)
+- Dynamic opponent betting: Randomized bet sizes during training
+- Action mapping: call/raise buckets determined by actual bet size vs stack ratio
+- Robust learning: Model learns strategies across varied opponent bet distributions
+- Balanced sampling: Ensures proportional coverage across hand categories
+
+Training Process:
+1. Select scenario from deterministic set of 330 combinations
+2. Generate dynamic betting context (opponent action, bet size)
+3. Map available actions based on actual bet size vs stack
+4. Apply CFR regret matching for strategy selection
+5. Update regrets for counterfactual actions
+"""
 
 from enhanced_cfr_preflop_generator_v2 import (
     generate_enhanced_scenarios, simulate_enhanced_showdown, cards_to_str,
@@ -17,7 +39,7 @@ class EnhancedCFRTrainer:
     Enhanced CFR with tournament survival, stack awareness, and bet sizing
     """
     
-    def __init__(self, scenarios=None, n_scenarios=1000):
+    def __init__(self, scenarios=None):
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
         self.strategy_sum = defaultdict(lambda: defaultdict(float))
@@ -39,8 +61,9 @@ class EnhancedCFRTrainer:
             self.scenarios = scenarios
             print(f"🚀 Using provided {len(scenarios)} scenarios...")
         else:
-            self.scenarios = generate_enhanced_scenarios(n_scenarios)
-            print(f"🚀 Generated {n_scenarios} scenarios...")
+            from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+            self.scenarios = generate_enhanced_scenarios()
+            print(f"🚀 Generated {len(self.scenarios)} scenarios...")
 
         # Balanced hand category sampling (after scenarios are loaded)
         self.hand_category_visits = defaultdict(int)
@@ -120,9 +143,15 @@ class EnhancedCFRTrainer:
         return available_actions[chosen_idx]
 
     def play_enhanced_scenario(self, scenario):
-        """Play enhanced scenario with stack and tournament considerations"""
+        """Play enhanced scenario with dynamic opponent betting"""
         scenario_key = self.get_scenario_key(scenario)
-        available_actions = scenario["available_actions"]
+        
+        # Generate dynamic betting context (replaces static bet_size_category)
+        from enhanced_cfr_preflop_generator_v2 import generate_dynamic_betting_context
+        betting_context = generate_dynamic_betting_context(scenario)
+        
+        # Get available actions based on the dynamic betting context
+        available_actions = betting_context["available_actions"]
         
         # Hero's decision using CFR strategy
         hero_strategy = self.get_strategy(scenario_key, available_actions)
@@ -130,10 +159,10 @@ class EnhancedCFRTrainer:
         
         # Generate villain and their action
         villain_cards = self.generate_villain_hand(scenario['hero_cards_int'])
-        villain_action = self.get_enhanced_villain_action(villain_cards, scenario)
+        villain_action = self.get_enhanced_villain_action(villain_cards, scenario, betting_context)
         
-        # Calculate enhanced payoff with tournament considerations
-        payoff_result = self.calculate_enhanced_payoff(scenario, hero_action, villain_action, villain_cards)
+        # Calculate enhanced payoff with dynamic betting context
+        payoff_result = self.calculate_enhanced_payoff(scenario, hero_action, villain_action, villain_cards, betting_context)
         
         # Update regrets for all available actions
         self.update_enhanced_regrets(scenario_key, hero_action, hero_strategy, 
@@ -150,14 +179,14 @@ class EnhancedCFRTrainer:
             'payoff': payoff_result['payoff'],
             'hero_stack_after': payoff_result['hero_stack_after'],
             'busted': payoff_result['busted'],
-            'available_actions': available_actions
+            'available_actions': available_actions,
+            'betting_context': betting_context
         }
 
-    def calculate_enhanced_payoff(self, scenario, hero_action, villain_action, villain_cards):
-        """Calculate payoff with stack survival considerations (tournament_stage removed)"""
+    def calculate_enhanced_payoff(self, scenario, hero_action, villain_action, villain_cards, betting_context):
+        """Calculate payoff with dynamic betting context and stack survival considerations"""
         hero_stack_before = scenario['hero_stack_bb']
-        bet_amount = scenario['bet_to_call_bb']
-        # tournament_stage removed - using stack-based logic instead
+        bet_amount = betting_context['bet_to_call_bb']
         
         # Determine bet amounts based on actions
         hero_bet = self.get_bet_amount(hero_action, hero_stack_before, bet_amount)
@@ -179,7 +208,7 @@ class EnhancedCFRTrainer:
         # Base payoff
         base_payoff = stack_change / hero_stack_before  # Normalize by stack size
         
-        # Stack-based adjustments (replacing tournament-specific logic)
+        # Stack-based adjustments
         stack_payoff = self.apply_stack_adjustments(
             base_payoff, hero_stack_before, hero_stack_after, busted
         )
@@ -245,12 +274,11 @@ class EnhancedCFRTrainer:
                 deck.cards.remove(card)
         return deck.draw(2)
 
-    def get_enhanced_villain_action(self, villain_cards, scenario):
-        """Enhanced villain action based on stack context (tournament_stage removed)"""
+    def get_enhanced_villain_action(self, villain_cards, scenario, betting_context):
+        """Enhanced villain action based on stack context and dynamic betting"""
         try:
             villain_equity = self.estimate_villain_equity(villain_cards)
             villain_stack = scenario['villain_stack_bb']
-            # tournament_stage removed - using stack-based logic instead
             
             # Adjust strategy based on stack size
             if villain_stack <= 15:  # Short stack - push/fold
@@ -342,15 +370,15 @@ class EnhancedCFRTrainer:
             return actual_payoff
 
     def get_scenario_key(self, scenario):
-        """Enhanced scenario key with stack context (tournament_stage removed)"""
-        return (f"{scenario['hand_category']}_{scenario['hero_position']}_"
-                f"{scenario['stack_category']}_{scenario['bet_size_category']}")
+        """Enhanced scenario key without bet_size_category"""
+        return (f"{scenario['hand_category']}|{scenario['hero_position']}|"
+                f"{scenario['stack_category']}|{scenario['blinds_level']}")
 
     def export_strategies_to_csv(self, filename="enhanced_cfr_strategies.csv"):
         """
         Export all learned strategies to CSV with comprehensive scenario details.
         Includes probabilities for each action, scenario details (hole cards, position, 
-        stack depth, bet sizing info), and best action as determined by model.
+        stack depth, blinds level), and best action as determined by model.
         
         CSV columns include:
         - scenario_key: Unique identifier for the scenario
@@ -358,7 +386,7 @@ class EnhancedCFRTrainer:
         - example_hands: Sample hands from this category  
         - position: Hero's position (BTN/BB)
         - stack_depth: Stack size category (ultra_short, short, medium, deep, very_deep)
-        - bet_size_category: Size of bet to call (tiny, small, medium, large, no_bet)
+        - blinds_level: Blinds level (low, medium, high)
         - training_games: Number of training iterations for this scenario
         - best_action: Recommended action (FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH)
         - confidence: Probability of best action (0-1)
@@ -375,13 +403,13 @@ class EnhancedCFRTrainer:
         for scenario_key, strategy_counts in self.strategy_sum.items():
             if sum(strategy_counts.values()) > 0:  # Only export scenarios with data
                 
-                # Parse scenario key (tournament_stage removed)
-                parts = scenario_key.split("_")
+                # Parse scenario key (bet_size_category removed, blinds_level added)
+                parts = scenario_key.split("|")
                 if len(parts) >= 4:
                     hand_category = parts[0]
                     position = parts[1] 
                     stack_category = parts[2]
-                    bet_size_category = parts[3]
+                    blinds_level = parts[3]
                 else:
                     continue  # Skip malformed keys
                 
@@ -411,14 +439,14 @@ class EnhancedCFRTrainer:
                 # Get training count for this scenario
                 training_games = self.scenario_counter.get(scenario_key, 0)
                 
-                # Build export row (tournament_stage removed)
+                # Build export row (bet_size_category removed, blinds_level added)
                 row = {
                     'scenario_key': scenario_key,
                     'hand_category': hand_category,
                     'example_hands': example_hands,
                     'position': position,
                     'stack_depth': stack_category,
-                    'bet_size_category': bet_size_category,
+                    'blinds_level': blinds_level,
                     'training_games': training_games,
                     'best_action': best_action.upper(),
                     'confidence': round(best_action_confidence, 3),
@@ -502,14 +530,13 @@ class EnhancedCFRTrainer:
         """Calculate scenario space coverage statistics"""
         from enhanced_cfr_preflop_generator_v2 import PREFLOP_HAND_RANGES, STACK_CATEGORIES
         
-        # Calculate theoretical maximum scenarios
+        # Calculate theoretical maximum scenarios (bet_size_category removed)
         hand_categories = len(PREFLOP_HAND_RANGES)
         positions = 2  # BTN, BB
         stack_categories = len(STACK_CATEGORIES)
-        bet_size_categories = 5  # no_bet, tiny, small, large, huge
         blinds_levels = 3  # low, medium, high
         
-        total_possible = hand_categories * positions * stack_categories * bet_size_categories * blinds_levels
+        total_possible = hand_categories * positions * stack_categories * blinds_levels
         
         # Calculate coverage percentage
         unique_scenarios_visited = len(self.scenario_counter)
@@ -596,18 +623,18 @@ if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
     # Add a simple training function for testing
-    def run_enhanced_training(n_scenarios=100, n_iterations=200000, metrics_interval=1000):
+    def run_enhanced_training(n_iterations=200000, metrics_interval=1000):
         """Run enhanced CFR training with balanced sampling and performance tracking"""
         print(f"🚀 Running Enhanced CFR Training with Balanced Hand Category Coverage")
-        print(f"Scenarios: {n_scenarios}, Iterations: {n_iterations}")
+        print(f"Iterations: {n_iterations}")
         print(f"Metrics interval: every {metrics_interval} iterations")
         print(f"Action set: FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH")
         print(f"🎯 Using STRATIFIED SAMPLING for balanced hand category coverage")
         print("=" * 70)
         
-        # Generate scenarios
+        # Generate all possible scenarios (no manual n_scenarios parameter)
         from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
-        scenarios = generate_enhanced_scenarios(n_scenarios)
+        scenarios = generate_enhanced_scenarios()
         
         # Initialize trainer
         trainer = EnhancedCFRTrainer(scenarios=scenarios)

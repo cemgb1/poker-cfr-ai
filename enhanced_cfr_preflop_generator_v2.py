@@ -1,4 +1,30 @@
-# enhanced_cfr_preflop_generator_v2.py - Stack-aware tournament CFR scenarios
+# enhanced_cfr_preflop_generator_v2.py - CFR scenarios with dynamic opponent betting
+
+"""
+Enhanced CFR Preflop Scenario Generator
+
+This module generates all possible preflop poker scenarios for CFR training.
+Key refactoring: bet_size_category is NO LONGER a scenario variable.
+
+Scenario Space:
+- hand_category: 11 categories from PREFLOP_HAND_RANGES  
+- hero_position: 2 positions (BTN, BB)
+- stack_category: 5 categories from STACK_CATEGORIES
+- blinds_level: 3 levels (low, medium, high)
+- Total: 11 × 2 × 5 × 3 = 330 scenarios
+
+Dynamic Elements (generated during simulation):
+- opponent_action: The opponent's specific betting action
+- bet_to_call_bb: Amount hero needs to call (varies per training iteration)
+- bet_size_category: Used only for action mapping, not scenario keys
+- available_actions: Actions mapped based on actual bet size vs stack
+
+Actions: fold, call_small, call_mid, call_high, raise_small, raise_mid, raise_high
+Action mapping depends on bet size as % of stack:
+- call_small: ≤15% of stack
+- call_mid: 15-30% of stack  
+- call_high: >30% of stack
+"""
 
 from treys import Card, Deck, Evaluator
 import random
@@ -43,30 +69,46 @@ ACTIONS = {
     "raise_high": 6     # Raise 3x+ or all-in
 }
 
-def generate_enhanced_scenarios(n_scenarios=1000):
-    """Generate stack-aware CFR scenarios with tournament context"""
+def generate_enhanced_scenarios():
+    """
+    Generate all possible CFR scenario combinations across:
+    - hand_category (from PREFLOP_HAND_RANGES)
+    - hero_position (BTN, BB) 
+    - stack_category (from STACK_CATEGORIES)
+    - blinds_level (low, medium, high)
+    
+    Does NOT include bet_size_category as a scenario variable.
+    Opponent bet sizes are randomized during simulation/training.
+    """
     scenarios = []
     hand_categories = list(PREFLOP_HAND_RANGES.keys())
+    positions = ["BTN", "BB"]
+    stack_categories = list(STACK_CATEGORIES.keys())
+    blinds_levels = ["low", "medium", "high"]
     
-    print(f"🎯 Generating {n_scenarios} enhanced CFR scenarios...")
-    print(f"🏆 Features: Stack sizes, bet sizing, tournament survival")
+    total_combinations = len(hand_categories) * len(positions) * len(stack_categories) * len(blinds_levels)
     
-    # Distribute across categories and stack sizes
-    scenarios_per_category = n_scenarios // len(hand_categories)
-    remainder = n_scenarios % len(hand_categories)
+    print(f"🎯 Generating all possible CFR scenario combinations...")
+    print(f"🏆 Features: Hand categories, positions, stack depths, blinds levels")
+    print(f"🎲 Total combinations: {total_combinations}")
+    print(f"   • Hand categories: {len(hand_categories)}")
+    print(f"   • Positions: {len(positions)}")  
+    print(f"   • Stack categories: {len(stack_categories)}")
+    print(f"   • Blinds levels: {len(blinds_levels)}")
     
     scenario_id = 0
     
-    for i, hand_category in enumerate(hand_categories):
-        target_for_category = scenarios_per_category + (1 if i < remainder else 0)
-        
-        print(f"🎲 Generating {target_for_category} scenarios for {hand_category}...")
-        
-        for _ in range(target_for_category):
-            scenario = create_enhanced_scenario(scenario_id, hand_category)
-            if scenario:
-                scenarios.append(scenario)
-                scenario_id += 1
+    for hand_category in hand_categories:
+        for hero_position in positions:
+            for stack_category in stack_categories:
+                for blinds_level in blinds_levels:
+                    scenario = create_enhanced_scenario(
+                        scenario_id, hand_category, hero_position, 
+                        stack_category, blinds_level
+                    )
+                    if scenario:
+                        scenarios.append(scenario)
+                        scenario_id += 1
     
     print(f"🏆 Generated {len(scenarios)} enhanced scenarios")
     
@@ -82,51 +124,45 @@ def analyze_scenario_space():
     """Analyze and display total possible scenario combinations"""
     print(f"\n🧠 SCENARIO SPACE ANALYSIS:")
     
-    # Calculate theoretical maximum scenarios
+    # Calculate theoretical maximum scenarios (bet_size_category removed)
     hand_categories = len(PREFLOP_HAND_RANGES)
     positions = 2  # BTN, BB
     stack_categories = len(STACK_CATEGORIES)  
-    bet_size_categories = 5  # no_bet, tiny, small, large, huge
     blinds_levels = 3  # low, medium, high
     
-    total_possible = hand_categories * positions * stack_categories * bet_size_categories * blinds_levels
+    total_possible = hand_categories * positions * stack_categories * blinds_levels
     
     print(f"Hand categories: {hand_categories}")
     print(f"Positions: {positions} (BTN, BB)")
     print(f"Stack categories: {stack_categories} ({list(STACK_CATEGORIES.keys())})")
-    print(f"Bet size categories: {bet_size_categories} (no_bet, tiny, small, large, huge)")
     print(f"Blinds levels: {blinds_levels} (low, medium, high)")
     print(f"")
-    print(f"🎯 THEORETICAL MAXIMUM SCENARIOS: {total_possible:,}")
-    print(f"   This represents the complete scenario space that CFR can explore")
-    print(f"   With balanced sampling, each category gets proportional coverage")
+    print(f"🎯 TOTAL SCENARIO COMBINATIONS: {total_possible:,}")
+    print(f"   This represents the complete scenario space that CFR explores")
+    print(f"   Opponent bet sizes are randomized during training for each scenario")
+    print(f"   Actions are mapped to buckets based on actual bet size vs stack")
 
-def create_enhanced_scenario(scenario_id, hand_category):
-    """Create enhanced scenario with stack and tournament context"""
+def create_enhanced_scenario(scenario_id, hand_category, hero_position, stack_category, blinds_level):
+    """
+    Create enhanced scenario with deterministic combination of:
+    - hand_category: The hand strength category
+    - hero_position: BTN or BB
+    - stack_category: Stack depth category
+    - blinds_level: Tournament blinds level
+    
+    Opponent bet size is NOT part of scenario key - it's randomized during simulation.
+    """
     try:
         # Generate hero's cards
         hero_cards = generate_hole_cards_for_category(hand_category)
         if not hero_cards:
             return None
         
-        # Random position (heads-up)
-        hero_position = random.choice(["BTN", "BB"])
-        
-        # Generate stack context
-        stack_category = random.choice(list(STACK_CATEGORIES.keys()))
+        # Use provided position and stack category
         min_stack, max_stack = STACK_CATEGORIES[stack_category]
         hero_stack_bb = random.randint(min_stack, max_stack)
         
-        # Generate opponent's action and bet size
-        opponent_action, bet_to_call_bb = generate_opponent_betting(hero_stack_bb, hero_position)
-        
-        # Calculate bet sizing context
-        bet_size_category = get_bet_size_category(bet_to_call_bb, hero_stack_bb)
-        pot_odds = calculate_pot_odds(bet_to_call_bb, hero_position)
-        
-        # Tournament context - removed tournament_stage parameter
-        
-        # Create enhanced scenario
+        # Create enhanced scenario WITHOUT bet_size_category in the key
         scenario = {
             "scenario_id": scenario_id,
             "hand_category": hand_category,
@@ -140,17 +176,12 @@ def create_enhanced_scenario(scenario_id, hand_category):
             "stack_category": stack_category,
             "villain_stack_bb": random.randint(min_stack, max_stack),  # Similar stack
             
-            # Enhanced betting context
-            "opponent_action": opponent_action,
-            "bet_to_call_bb": bet_to_call_bb,
-            "bet_size_category": bet_size_category,
-            "pot_odds": round(pot_odds, 2),
+            # Tournament context
+            "blinds_level": blinds_level,
             
-            # Tournament context - removed tournament_stage
-            "blinds_level": random.choice(["low", "medium", "high"]),
-            
-            # Available actions for this scenario
-            "available_actions": get_available_actions(hero_stack_bb, bet_to_call_bb)
+            # NOTE: opponent_action, bet_to_call_bb, bet_size_category, and pot_odds
+            # are NOT included in the base scenario since they vary during training.
+            # They will be generated dynamically during simulation.
         }
         
         return scenario
@@ -158,6 +189,39 @@ def create_enhanced_scenario(scenario_id, hand_category):
     except Exception as e:
         print(f"Error creating enhanced scenario: {e}")
         return None
+
+def generate_dynamic_betting_context(scenario):
+    """
+    Generate dynamic betting context for a scenario during simulation.
+    This replaces the static bet_size_category with randomized opponent betting.
+    
+    Returns dict with:
+    - opponent_action: The opponent's betting action
+    - bet_to_call_bb: Amount hero needs to call
+    - bet_size_category: Categorization of the bet size (for action mapping)
+    - pot_odds: Current pot odds
+    - available_actions: Actions available to hero given this bet
+    """
+    hero_stack_bb = scenario['hero_stack_bb']
+    hero_position = scenario['hero_position']
+    
+    # Generate opponent's action and bet size (same logic as before)
+    opponent_action, bet_to_call_bb = generate_opponent_betting(hero_stack_bb, hero_position)
+    
+    # Calculate bet sizing context for action mapping
+    bet_size_category = get_bet_size_category(bet_to_call_bb, hero_stack_bb)
+    pot_odds = calculate_pot_odds(bet_to_call_bb, hero_position)
+    
+    # Get available actions based on this specific bet
+    available_actions = get_available_actions(hero_stack_bb, bet_to_call_bb)
+    
+    return {
+        "opponent_action": opponent_action,
+        "bet_to_call_bb": bet_to_call_bb,
+        "bet_size_category": bet_size_category,
+        "pot_odds": round(pot_odds, 2),
+        "available_actions": available_actions
+    }
 
 def generate_opponent_betting(hero_stack_bb, hero_position):
     """Generate realistic opponent betting based on stack size"""
@@ -344,6 +408,12 @@ def analyze_scenario_distribution(scenarios):
     """Analyze enhanced scenario distribution"""
     print(f"\n📊 ENHANCED SCENARIO DISTRIBUTION:")
     
+    # Hand categories
+    hand_counts = Counter(s['hand_category'] for s in scenarios)
+    print(f"\nHand Categories:")
+    for hand_cat, count in hand_counts.most_common():
+        print(f"  {hand_cat:18s}: {count:3d} scenarios")
+    
     # Stack categories
     stack_counts = Counter(s['stack_category'] for s in scenarios)
     print(f"\nStack Categories:")
@@ -351,26 +421,20 @@ def analyze_scenario_distribution(scenarios):
         avg_stack = np.mean([s['hero_stack_bb'] for s in scenarios if s['stack_category'] == stack_cat])
         print(f"  {stack_cat:12s}: {count:3d} scenarios (avg: {avg_stack:.1f}bb)")
     
-    # Bet sizing
-    bet_size_counts = Counter(s['bet_size_category'] for s in scenarios)
-    print(f"\nBet Size Categories:")
-    for bet_cat, count in bet_size_counts.most_common():
-        print(f"  {bet_cat:8s}: {count:3d} scenarios")
+    # Positions
+    position_counts = Counter(s['hero_position'] for s in scenarios)
+    print(f"\nPositions:")
+    for position, count in position_counts.most_common():
+        print(f"  {position:8s}: {count:3d} scenarios")
     
-    # Tournament stages - removed from distribution analysis
-    # tournament_counts = Counter(s['tournament_stage'] for s in scenarios)
-    # print(f"\nTournament Stages:")
-    # for stage, count in tournament_counts.most_common():
-    #     print(f"  {stage:8s}: {count:3d} scenarios")
+    # Blinds levels
+    blinds_counts = Counter(s['blinds_level'] for s in scenarios)
+    print(f"\nBlinds Levels:")
+    for blinds, count in blinds_counts.most_common():
+        print(f"  {blinds:8s}: {count:3d} scenarios")
     
-    # Available actions variety
-    action_variety = set()
-    for s in scenarios:
-        action_variety.update(s['available_actions'])
-    print(f"\nAction Types Available: {len(action_variety)}")
-    for action in sorted(action_variety):
-        action_count = sum(1 for s in scenarios if action in s['available_actions'])
-        print(f"  {action:12s}: {action_count:3d} scenarios")
+    print(f"\n💡 Note: Opponent bet sizes are randomized during training")
+    print(f"   Each scenario will experience various bet sizes and action mappings")
 
 def cards_to_str(cards):
     """Convert card integers to readable strings"""
@@ -378,17 +442,21 @@ def cards_to_str(cards):
 
 if __name__ == "__main__":
     # Test enhanced scenario generation
-    scenarios = generate_enhanced_scenarios(200)
+    scenarios = generate_enhanced_scenarios()
     
     print(f"\n🎯 SAMPLE ENHANCED SCENARIOS:")
     for i, scenario in enumerate(scenarios[:8]):
         print(f"{i+1}. {scenario['hand_category']:15s} | {scenario['hero_cards']:8s} | "
-              f"{scenario['stack_category']:12s} ({scenario['hero_stack_bb']:2d}bb) | "
-              f"{scenario['bet_size_category']:5s} bet")
-        print(f"   Available actions: {', '.join(scenario['available_actions'])}")
+              f"{scenario['hero_position']:3s} | {scenario['stack_category']:12s} ({scenario['hero_stack_bb']:2d}bb) | "
+              f"{scenario['blinds_level']:6s}")
+        
+        # Show example of dynamic betting context
+        betting_ctx = generate_dynamic_betting_context(scenario)
+        print(f"   Example bet: {betting_ctx['opponent_action']} {betting_ctx['bet_to_call_bb']}bb -> "
+              f"{', '.join(betting_ctx['available_actions'])}")
     
     print(f"\n💡 Enhanced CFR Ready!")
-    print(f"   • Stack-aware action selection")
-    print(f"   • Tournament survival mechanics")
-    print(f"   • Bet sizing categorization")
-    print(f"   • Realistic opponent modeling")
+    print(f"   • Deterministic scenario combinations (no bet_size_category)")
+    print(f"   • Dynamic opponent bet sizing during simulation")
+    print(f"   • Action mapping based on actual bet vs stack ratios")
+    print(f"   • Robust to opponent bet size distributions")
