@@ -17,33 +17,48 @@ class EnhancedCFRTrainer:
     Simplified CFR with Monte Carlo sampling and heads-up play
     """
     
-    def __init__(self, scenarios=None, n_scenarios=1000):
+    def __init__(self, scenarios=None, n_scenarios=1000, monte_carlo=False, simulations_per_scenario=100):
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
         self.strategy_sum = defaultdict(lambda: defaultdict(float))
         self.scenario_counter = Counter()
         self.iterations = 0
+        self.monte_carlo = monte_carlo
+        self.simulations_per_scenario = simulations_per_scenario
 
         # Performance metrics tracking
         self.performance_metrics = []
         self.start_time = None
         self.last_iteration_time = None
         
-        # Generate simplified scenarios, or use provided ones
-        if scenarios is not None:
-            self.scenarios = scenarios
-            print(f"🚀 Using provided {len(scenarios)} scenarios...")
+        if monte_carlo:
+            # Monte Carlo mode - use pre-defined scenarios, run X simulations each
+            if scenarios is not None:
+                self.scenarios = scenarios
+            else:
+                from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+                self.scenarios = generate_enhanced_scenarios(n_scenarios)
+            
+            print(f"🚀 Monte Carlo CFR Mode - {simulations_per_scenario} simulations per scenario")
+            print(f"🎯 Total target iterations: {len(self.scenarios) * simulations_per_scenario}")
         else:
-            self.scenarios = generate_enhanced_scenarios(n_scenarios)
-            print(f"🚀 Generated {n_scenarios} scenarios...")
+            # Traditional mode - use pre-generated scenarios
+            if scenarios is not None:
+                self.scenarios = scenarios
+                print(f"🚀 Using provided {len(scenarios)} scenarios...")
+            else:
+                from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+                self.scenarios = generate_enhanced_scenarios(n_scenarios)
+                print(f"🚀 Generated {n_scenarios} scenarios...")
 
         # Balanced hand category sampling (after scenarios are loaded)
         self.hand_category_visits = defaultdict(int)
         self.scenarios_by_category = self._group_scenarios_by_category()
             
-        print(f"🏆 Simplified CFR Trainer Initialized!")
+        print(f"🏆 {'Monte Carlo' if monte_carlo else 'Simplified'} CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
-        print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
+        if not monte_carlo:
+            print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
 
     def get_strategy(self, scenario_key, available_actions):
         """Get strategy using regret matching for available actions only"""
@@ -77,9 +92,13 @@ class EnhancedCFRTrainer:
     
     def select_balanced_scenario(self):
         """
-        Select scenario using stratified sampling to ensure balanced hand category coverage.
-        Prioritizes categories with fewer visits to maintain proportional training.
+        Select scenario for Monte Carlo CFR or traditional balanced sampling.
+        In Monte Carlo mode, ensures each scenario gets exactly X simulations before moving to next.
         """
+        if self.monte_carlo:
+            return self.select_monte_carlo_scenario()
+        
+        # Traditional mode - select from pre-generated scenarios with balance
         if not self.hand_category_visits:
             # First iteration - select random category
             category = random.choice(list(self.scenarios_by_category.keys()))
@@ -107,6 +126,55 @@ class EnhancedCFRTrainer:
         self.hand_category_visits[category] += 1
         
         return scenario
+
+    def select_monte_carlo_scenario(self):
+        """
+        Select next scenario for Monte Carlo CFR.
+        Ensures each scenario gets exactly simulations_per_scenario visits before moving to next.
+        """
+        # Find scenario with fewest visits
+        scenario_visits = {self.get_scenario_key(s): self.scenario_counter.get(self.get_scenario_key(s), 0) 
+                          for s in self.scenarios}
+        
+        # Get scenario with minimum visits (round-robin style)
+        min_visits = min(scenario_visits.values()) if scenario_visits else 0
+        
+        # Find all scenarios with minimum visits
+        candidates = [s for s in self.scenarios 
+                     if self.scenario_counter.get(self.get_scenario_key(s), 0) == min_visits]
+        
+        # Select randomly from candidates (for variety within each round)
+        selected_scenario = random.choice(candidates)
+        
+        return selected_scenario
+
+    def should_continue_training(self, min_visits_per_scenario=None):
+        """
+        Determine if training should continue based on dynamic stopping criteria.
+        
+        Args:
+            min_visits_per_scenario: Minimum number of times each scenario should be visited.
+                                   For Monte Carlo mode, defaults to simulations_per_scenario.
+            
+        Returns:
+            bool: True if training should continue, False if stopping criteria met
+        """
+        if not self.scenario_counter:
+            return True  # Continue if no scenarios visited yet
+        
+        # Set default minimum visits
+        if min_visits_per_scenario is None:
+            min_visits_per_scenario = self.simulations_per_scenario if self.monte_carlo else 100
+        
+        # Check minimum visits per scenario
+        min_visits = min(self.scenario_counter.values()) if self.scenario_counter else 0
+        
+        if self.monte_carlo:
+            # Monte Carlo mode: stop when all scenarios have required visits
+            return min_visits < min_visits_per_scenario
+        else:
+            # Traditional mode: stop when minimum visits reached
+            return min_visits < min_visits_per_scenario
 
     def sample_action(self, strategy, available_actions):
         """Sample action from strategy probabilities"""
@@ -549,13 +617,74 @@ class EnhancedCFRTrainer:
 if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
+    def run_monte_carlo_training(n_scenarios=100, simulations_per_scenario=50, metrics_interval=1000):
+        """Run Monte Carlo CFR training with X simulations per scenario"""
+        print(f"🎯 Running Monte Carlo CFR Training")
+        print(f"Scenarios: {n_scenarios}, Simulations per scenario: {simulations_per_scenario}")
+        print(f"Total iterations target: {n_scenarios * simulations_per_scenario} (X × n)")
+        print(f"Action set: FOLD, CALL, RAISE_SMALL, SHOVE")
+        print(f"🎯 Using ROUND-ROBIN scenario coverage")
+        print("=" * 70)
+        
+        # Generate scenarios first
+        from enhanced_cfr_preflop_generator_v2 import generate_enhanced_scenarios
+        scenarios = generate_enhanced_scenarios(n_scenarios)
+        
+        # Initialize Monte Carlo trainer
+        trainer = EnhancedCFRTrainer(scenarios=scenarios, monte_carlo=True, 
+                                    simulations_per_scenario=simulations_per_scenario)
+        
+        # Start performance tracking
+        trainer.start_performance_tracking()
+        
+        # Train with dynamic stopping criteria
+        print(f"\n🎯 Starting Monte Carlo CFR training...")
+        iteration = 0
+        
+        while trainer.should_continue_training():
+            # Select scenario using round-robin approach
+            scenario = trainer.select_balanced_scenario()
+            trainer.play_enhanced_scenario(scenario)
+            trainer.scenario_counter[trainer.get_scenario_key(scenario)] += 1
+            iteration += 1
+            
+            # Record metrics at regular intervals
+            if iteration % metrics_interval == 0:
+                metrics = trainer.record_iteration_metrics(iteration)
+                min_visits = min(trainer.scenario_counter.values()) if trainer.scenario_counter else 0
+                max_visits = max(trainer.scenario_counter.values()) if trainer.scenario_counter else 0
+                print(f"Iteration {iteration:6d}: {metrics['unique_scenarios_visited']:3d} scenarios, "
+                      f"visits: min={min_visits}, max={max_visits}")
+        
+        # Record final metrics
+        final_metrics = trainer.record_iteration_metrics(iteration - 1)
+        
+        print(f"✅ Monte Carlo training complete after {iteration:,} iterations")
+        print(f"📊 All scenarios visited {simulations_per_scenario} times")
+        print(f"🎯 Hand category coverage balance:")
+        total_visits = sum(trainer.hand_category_visits.values())
+        for category, visits in trainer.hand_category_visits.items():
+            percentage = (visits / total_visits) * 100 if total_visits > 0 else 0
+            print(f"   {category:15s}: {visits:6d} visits ({percentage:5.1f}%)")
+        
+        # Show scenario visit distribution
+        min_visits = min(trainer.scenario_counter.values()) if trainer.scenario_counter else 0
+        max_visits = max(trainer.scenario_counter.values()) if trainer.scenario_counter else 0
+        print(f"\n📈 All scenarios have {min_visits}-{max_visits} visits (target: {simulations_per_scenario})")
+        
+        # Export both strategy results and performance metrics
+        trainer.export_strategies_to_csv("monte_carlo_cfr_results.csv")
+        trainer.export_performance_metrics("monte_carlo_performance.csv")
+        
+        return trainer
+    
     # Add a simple training function for testing
     def run_enhanced_training(n_scenarios=100, n_iterations=200000, metrics_interval=1000):
         """Run enhanced CFR training with balanced sampling and performance tracking"""
         print(f"🚀 Running Enhanced CFR Training with Balanced Hand Category Coverage")
         print(f"Scenarios: {n_scenarios}, Iterations: {n_iterations}")
         print(f"Metrics interval: every {metrics_interval} iterations")
-        print(f"Action set: FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH")
+        print(f"Action set: FOLD, CALL, RAISE_SMALL, SHOVE")
         print(f"🎯 Using STRATIFIED SAMPLING for balanced hand category coverage")
         print("=" * 70)
         
