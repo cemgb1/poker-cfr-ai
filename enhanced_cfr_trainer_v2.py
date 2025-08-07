@@ -52,15 +52,45 @@ import pickle
 
 class EnhancedCFRTrainer:
     """
-    Enhanced CFR with tournament survival, stack awareness, and bet sizing
+    Enhanced CFR with tournament survival, stack awareness, and bet sizing.
+    
+    Now includes advanced pruning techniques:
+    1. Regret-based pruning: Skip actions with regret below threshold
+    2. Strategy pruning: Exclude low-probability actions from exports
+    3. Action space pruning: Context-aware action filtering
     """
     
-    def __init__(self, scenarios=None):
+    def __init__(self, scenarios=None, enable_pruning=True, regret_pruning_threshold=-300.0, 
+                 strategy_pruning_threshold=0.001):
+        """
+        Initialize Enhanced CFR Trainer with optional pruning capabilities.
+        
+        Args:
+            scenarios: Pre-generated scenarios (optional)
+            enable_pruning: Enable all pruning techniques (default True)
+            regret_pruning_threshold: Threshold for regret-based pruning (default -300.0)
+            strategy_pruning_threshold: Threshold for strategy pruning (default 0.001)
+        """
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
         self.strategy_sum = defaultdict(lambda: defaultdict(float))
         self.scenario_counter = Counter()
         self.iterations = 0
+
+        # Pruning parameters
+        self.enable_pruning = enable_pruning
+        self.regret_pruning_threshold = regret_pruning_threshold
+        self.strategy_pruning_threshold = strategy_pruning_threshold
+        
+        # Pruning tracking
+        self.pruned_actions = defaultdict(set)  # Track pruned actions per scenario
+        self.pruning_statistics = {
+            'regret_pruned_count': 0,
+            'strategy_pruned_count': 0,
+            'actions_restored_count': 0,
+            'total_pruning_events': 0
+        }
+        self.restoration_chances = defaultdict(int)  # Track restoration attempts per scenario
 
         # Enhanced tracking
         self.stack_survival_rate = []
@@ -88,12 +118,112 @@ class EnhancedCFRTrainer:
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
         print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
+        if self.enable_pruning:
+            print(f"✂️ Pruning enabled: regret_threshold={self.regret_pruning_threshold}, strategy_threshold={self.strategy_pruning_threshold}")
+
+    def get_relevant_actions(self, scenario, betting_context):
+        """
+        Action Space Pruning: Filter actions based on contextual relevance.
+        
+        Args:
+            scenario: Current scenario dictionary
+            betting_context: Dictionary with betting information
+            
+        Returns:
+            List of contextually relevant actions
+        """
+        if not self.enable_pruning:
+            # Return all standard actions if pruning disabled
+            return ["fold", "call_small", "call_mid", "call_high", "raise_small", "raise_mid", "raise_high"]
+        
+        relevant_actions = []
+        hand_category = scenario.get('hand_category', 'unknown')
+        stack_category = scenario.get('stack_category', 'medium')
+        opponent_bet = betting_context.get('bet_size', 0)
+        
+        # Always include fold as an option
+        relevant_actions.append("fold")
+        
+        # Contextual filtering logic
+        if hand_category in ['trash', 'weak_aces']:
+            # Trash hands: mostly fold/call only, limited raising
+            if opponent_bet == 0:  # No bet to call
+                relevant_actions.extend(["raise_small"])
+            else:
+                relevant_actions.extend(["call_small"])
+        elif hand_category in ['premium_pairs', 'premium_aces']:
+            # Premium hands: all actions available
+            if opponent_bet == 0:
+                relevant_actions.extend(["raise_small", "raise_mid", "raise_high"])
+            else:
+                relevant_actions.extend(["call_small", "call_mid", "call_high", "raise_small", "raise_mid", "raise_high"])
+        else:
+            # Medium hands: moderate action selection
+            if opponent_bet == 0:
+                relevant_actions.extend(["call_small", "raise_small", "raise_mid"])
+            else:
+                relevant_actions.extend(["call_small", "call_mid", "raise_small"])
+        
+        # Stack-based filtering
+        if stack_category in ['ultra_short', 'short']:
+            # Short stacks: remove high calls/raises, prefer all-in equivalent actions
+            relevant_actions = [action for action in relevant_actions 
+                              if action not in ['call_high', 'raise_high']]
+        
+        # Log pruning event
+        if len(relevant_actions) < 7:  # Fewer than all possible actions
+            self.pruning_statistics['total_pruning_events'] += 1
+            
+        return list(set(relevant_actions))  # Remove duplicates
 
     def get_strategy(self, scenario_key, available_actions):
-        """Get strategy using regret matching for available actions only"""
+        """
+        Get strategy using regret matching for available actions with optional regret-based pruning.
+        
+        Args:
+            scenario_key: Unique identifier for the scenario
+            available_actions: List of available actions
+            
+        Returns:
+            Dictionary mapping actions to probabilities
+        """
         regrets = self.regret_sum[scenario_key]
         
-        # Only consider regrets for available actions
+        # Apply regret-based pruning if enabled
+        if self.enable_pruning:
+            # Check for 1% restoration chance for pruned actions
+            if random.random() < 0.01:
+                self._restore_pruned_actions(scenario_key)
+            
+            # Filter out actions with regret below threshold 
+            filtered_actions = []
+            for action in available_actions:
+                action_regret = regrets.get(action, 0)
+                
+                # Include action if:
+                # 1. Regret is above threshold, OR
+                # 2. Action was previously pruned but not in current pruned set (restored)
+                if action_regret >= self.regret_pruning_threshold:
+                    filtered_actions.append(action)
+                    # Remove from pruned set if it was there (regret improved)
+                    self.pruned_actions[scenario_key].discard(action)
+                else:
+                    # Action is below threshold - add to pruned set
+                    if action not in self.pruned_actions[scenario_key]:
+                        self.pruned_actions[scenario_key].add(action)
+                        self.pruning_statistics['regret_pruned_count'] += 1
+            
+            # Ensure at least one action remains
+            if not filtered_actions:
+                # Keep the action with the highest regret, even if below threshold
+                best_action = max(available_actions, key=lambda a: regrets.get(a, 0))
+                filtered_actions = [best_action]
+                # Remove it from pruned set since we're keeping it
+                self.pruned_actions[scenario_key].discard(best_action)
+                
+            available_actions = filtered_actions
+        
+        # Only consider regrets for available (non-pruned) actions
         action_regrets = [regrets.get(action, 0) for action in available_actions]
         positive_regrets = np.maximum(action_regrets, 0)
         regret_sum = np.sum(positive_regrets)
@@ -110,6 +240,17 @@ class EnhancedCFRTrainer:
             strategy[action] = strategy_probs[i]
             
         return strategy
+    
+    def _restore_pruned_actions(self, scenario_key):
+        """
+        Restore pruned actions with 1% chance for exploration.
+        """
+        if scenario_key in self.pruned_actions and self.pruned_actions[scenario_key]:
+            # Restore one random pruned action
+            action_to_restore = random.choice(list(self.pruned_actions[scenario_key]))
+            self.pruned_actions[scenario_key].discard(action_to_restore)
+            self.pruning_statistics['actions_restored_count'] += 1
+            self.restoration_chances[scenario_key] += 1
 
     def _group_scenarios_by_category(self):
         """Group scenarios by hand category for balanced sampling"""
@@ -159,17 +300,35 @@ class EnhancedCFRTrainer:
         return available_actions[chosen_idx]
 
     def play_enhanced_scenario(self, scenario):
-        """Play enhanced scenario with dynamic opponent betting"""
+        """
+        Play enhanced scenario with dynamic opponent betting and integrated pruning techniques.
+        
+        Now includes:
+        1. Action space pruning before strategy calculation
+        2. Dynamic betting context generation
+        3. Enhanced CFR strategy calculation
+        """
         scenario_key = self.get_scenario_key(scenario)
         
         # Generate dynamic betting context (replaces static bet_size_category)
         from enhanced_cfr_preflop_generator_v2 import generate_dynamic_betting_context
         betting_context = generate_dynamic_betting_context(scenario)
         
-        # Get available actions based on the dynamic betting context
-        available_actions = betting_context["available_actions"]
+        # Get initially available actions based on the dynamic betting context
+        initial_available_actions = betting_context["available_actions"]
         
-        # Hero's decision using CFR strategy
+        # Apply action space pruning to filter contextually relevant actions
+        if self.enable_pruning:
+            relevant_actions = self.get_relevant_actions(scenario, betting_context)
+            # Take intersection of initially available and contextually relevant actions
+            available_actions = [action for action in initial_available_actions if action in relevant_actions]
+            # Ensure at least one action remains
+            if not available_actions:
+                available_actions = initial_available_actions[:1]  # Keep at least one action
+        else:
+            available_actions = initial_available_actions
+        
+        # Hero's decision using CFR strategy (now with pruned action space)
         hero_strategy = self.get_strategy(scenario_key, available_actions)
         hero_action = self.sample_action(hero_strategy, available_actions)
         
@@ -180,7 +339,7 @@ class EnhancedCFRTrainer:
         # Calculate enhanced payoff with dynamic betting context
         payoff_result = self.calculate_enhanced_payoff(scenario, hero_action, villain_action, villain_cards, betting_context)
         
-        # Update regrets for all available actions
+        # Update regrets for all available (potentially pruned) actions
         self.update_enhanced_regrets(scenario_key, hero_action, hero_strategy, 
                                    payoff_result, available_actions)
         
@@ -196,6 +355,7 @@ class EnhancedCFRTrainer:
             'hero_stack_after': payoff_result['hero_stack_after'],
             'busted': payoff_result['busted'],
             'available_actions': available_actions,
+            'initial_actions': initial_available_actions,  # Track original vs pruned
             'betting_context': betting_context
         }
 
@@ -345,11 +505,26 @@ class EnhancedCFRTrainer:
 
     def update_enhanced_regrets(self, scenario_key, action_taken, strategy, 
                               payoff_result, available_actions):
-        """Enhanced regret update considering all available actions"""
+        """
+        Enhanced regret update considering all available actions with regret-based pruning support.
+        
+        Args:
+            scenario_key: Unique identifier for the scenario
+            action_taken: Action that was actually taken
+            strategy: Strategy probabilities used
+            payoff_result: Result of the action
+            available_actions: Actions that were available
+        """
         actual_payoff = payoff_result['payoff']
         
         # Estimate counterfactual payoffs for other actions
         for action in available_actions:
+            # Skip regret updates for actions below pruning threshold (if pruning enabled)
+            if (self.enable_pruning and 
+                action in self.pruned_actions[scenario_key] and 
+                self.regret_sum[scenario_key][action] < self.regret_pruning_threshold):
+                continue  # Skip updating regret for pruned actions
+            
             if action == action_taken:
                 # Actual result
                 self.regret_sum[scenario_key][action] += 0  # No regret for chosen action
@@ -435,22 +610,110 @@ class EnhancedCFRTrainer:
                     examples = PREFLOP_HAND_RANGES[hand_category][:3]  # First 3 examples
                     example_hands = ", ".join(examples)
                 
+    def export_strategies_to_csv(self, filename="enhanced_cfr_strategies.csv"):
+        """
+        Export all learned strategies to CSV with comprehensive scenario details and strategy pruning.
+        Includes probabilities for each action, scenario details (hole cards, position, 
+        stack depth, blinds level), and best action as determined by model.
+        
+        Strategy Pruning: Excludes actions below strategy_pruning_threshold and renormalizes probabilities.
+        
+        CSV columns include:
+        - scenario_key: Unique identifier for the scenario
+        - hand_category: Broad category of hole cards (premium_pairs, medium_aces, etc.)
+        - example_hands: Sample hands from this category  
+        - position: Hero's position (BTN/BB)
+        - stack_depth: Stack size category (ultra_short, short, medium, deep, very_deep)
+        - blinds_level: Blinds level (low, medium, high)
+        - training_games: Number of training iterations for this scenario
+        - actions_pruned_count: Number of actions pruned due to low probability
+        - best_action: Recommended action (FOLD, CALL_SMALL, CALL_MID, CALL_HIGH, RAISE_SMALL, RAISE_MID, RAISE_HIGH)
+        - confidence: Probability of best action (0-1)
+        - fold_prob through raise_high_prob: Probability of each action
+        """
+        import pandas as pd
+        from enhanced_cfr_preflop_generator_v2 import ACTIONS, PREFLOP_HAND_RANGES
+        
+        print(f"📊 Exporting strategies to {filename}...")
+        
+        # Collect all strategy data
+        export_data = []
+        total_actions_pruned = 0
+        
+        for scenario_key, strategy_counts in self.strategy_sum.items():
+            if sum(strategy_counts.values()) > 0:  # Only export scenarios with data
+                
+                # Parse scenario key (bet_size_category removed, blinds_level added)
+                parts = scenario_key.split("|")
+                if len(parts) >= 4:
+                    hand_category = parts[0]
+                    position = parts[1] 
+                    stack_category = parts[2]
+                    blinds_level = parts[3]
+                else:
+                    continue  # Skip malformed keys
+                
+                # Get example hands for this category
+                example_hands = ""
+                if hand_category in PREFLOP_HAND_RANGES:
+                    examples = PREFLOP_HAND_RANGES[hand_category][:3]  # First 3 examples
+                    example_hands = ", ".join(examples)
+                
                 # Calculate average strategy (normalized probabilities)
                 total_count = sum(strategy_counts.values())
-                action_probs = {}
+                raw_action_probs = {}
+                
+                # Calculate raw probabilities first
+                for action, count in strategy_counts.items():
+                    if action in ACTIONS:
+                        raw_action_probs[action] = count / total_count
+                
+                # Apply strategy pruning if enabled
+                actions_pruned_count = 0
+                filtered_probs = {}
+                
+                if self.enable_pruning:
+                    # Filter out low-probability actions
+                    for action, prob in raw_action_probs.items():
+                        if prob >= self.strategy_pruning_threshold:
+                            filtered_probs[action] = prob
+                        else:
+                            actions_pruned_count += 1
+                            self.pruning_statistics['strategy_pruned_count'] += 1
+                    
+                    # Ensure at least one action remains
+                    if not filtered_probs:
+                        # Keep the highest probability action
+                        best_action = max(raw_action_probs.items(), key=lambda x: x[1])[0]
+                        filtered_probs[best_action] = raw_action_probs[best_action]
+                        actions_pruned_count -= 1  # Don't count the kept action as pruned
+                    
+                    # Renormalize probabilities
+                    if filtered_probs:
+                        total_filtered = sum(filtered_probs.values())
+                        for action in filtered_probs:
+                            filtered_probs[action] /= total_filtered
+                else:
+                    filtered_probs = raw_action_probs
+                
+                total_actions_pruned += actions_pruned_count
                 
                 # Initialize all action probabilities to 0
+                action_probs = {}
                 for action_name in ACTIONS.keys():
                     action_probs[f"{action_name}_prob"] = 0.0
                 
-                # Fill in actual probabilities
-                for action, count in strategy_counts.items():
-                    if action in ACTIONS:
-                        action_probs[f"{action}_prob"] = count / total_count
+                # Fill in filtered probabilities
+                for action, prob in filtered_probs.items():
+                    action_probs[f"{action}_prob"] = prob
                 
-                # Determine best action
-                best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
-                best_action_confidence = max(action_probs.values())
+                # Determine best action from filtered probabilities
+                if filtered_probs:
+                    best_action = max(filtered_probs.items(), key=lambda x: x[1])[0]
+                    best_action_confidence = max(filtered_probs.values())
+                else:
+                    best_action = "fold"  # Default fallback
+                    best_action_confidence = 1.0
                 
                 # Get training count for this scenario
                 training_games = self.scenario_counter.get(scenario_key, 0)
@@ -464,6 +727,7 @@ class EnhancedCFRTrainer:
                     'stack_depth': stack_category,
                     'blinds_level': blinds_level,
                     'training_games': training_games,
+                    'actions_pruned_count': actions_pruned_count,
                     'best_action': best_action.upper(),
                     'confidence': round(best_action_confidence, 3),
                     **{k: round(v, 3) for k, v in action_probs.items()}
@@ -484,11 +748,14 @@ class EnhancedCFRTrainer:
             print(f"✅ Exported {len(export_data)} scenarios to {filename}")
             print(f"📊 Columns: {list(df.columns)}")
             
-            # Show summary stats
+            # Show summary stats with pruning information
             print(f"\n📈 EXPORT SUMMARY:")
             print(f"Total scenarios: {len(export_data)}")
             print(f"Avg training games per scenario: {df['training_games'].mean():.1f}")
             print(f"Avg confidence: {df['confidence'].mean():.3f}")
+            if self.enable_pruning:
+                print(f"✂️ Total actions pruned: {total_actions_pruned}")
+                print(f"✂️ Avg actions pruned per scenario: {df['actions_pruned_count'].mean():.1f}")
             
             # Show action distribution
             print(f"\nBest Action Distribution:")
@@ -500,6 +767,34 @@ class EnhancedCFRTrainer:
         else:
             print("❌ No strategy data to export")
             return None
+    
+    def get_pruning_statistics(self):
+        """
+        Get comprehensive pruning effectiveness metrics.
+        
+        Returns:
+            Dictionary with pruning statistics and effectiveness metrics
+        """
+        stats = self.pruning_statistics.copy()
+        
+        # Calculate additional metrics
+        total_scenarios = len(self.regret_sum)
+        if total_scenarios > 0:
+            stats['scenarios_with_pruning'] = len([k for k, v in self.pruned_actions.items() if v])
+            stats['avg_pruned_actions_per_scenario'] = stats['regret_pruned_count'] / total_scenarios if total_scenarios > 0 else 0
+            stats['pruning_effectiveness'] = (stats['regret_pruned_count'] + stats['strategy_pruned_count']) / max(1, stats['total_pruning_events'])
+            stats['restoration_rate'] = stats['actions_restored_count'] / max(1, stats['regret_pruned_count'])
+        else:
+            stats['scenarios_with_pruning'] = 0
+            stats['avg_pruned_actions_per_scenario'] = 0
+            stats['pruning_effectiveness'] = 0
+            stats['restoration_rate'] = 0
+        
+        # Add restoration statistics per scenario
+        stats['scenarios_with_restorations'] = len([k for k, v in self.restoration_chances.items() if v > 0])
+        stats['total_restoration_attempts'] = sum(self.restoration_chances.values())
+        
+        return stats
 
     def start_performance_tracking(self):
         """Initialize performance tracking for the training session"""
@@ -650,8 +945,32 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
     
     def __init__(self, scenarios=None, rollouts_per_visit=1, iterations_per_scenario=1000, 
                  stopping_condition_window=20, regret_stability_threshold=0.05,
-                 min_rollouts_before_convergence=100):
-        super().__init__(scenarios)
+                 min_rollouts_before_convergence=100,
+                 enable_min_rollouts_stopping=True, enable_regret_stability_stopping=True,
+                 enable_max_iterations_stopping=True, stopping_condition_mode='flexible',
+                 enable_pruning=True, regret_pruning_threshold=-300.0, 
+                 strategy_pruning_threshold=0.001):
+        """
+        Initialize Sequential Scenario Trainer with modular stopping conditions and pruning.
+        
+        Args:
+            scenarios: Pre-generated scenarios (optional)
+            rollouts_per_visit: Number of rollouts per scenario visit
+            iterations_per_scenario: Maximum iterations per scenario
+            stopping_condition_window: Window size for regret stability check
+            regret_stability_threshold: Threshold for regret stability
+            min_rollouts_before_convergence: Minimum rollouts before convergence check
+            enable_min_rollouts_stopping: Enable minimum rollouts stopping condition
+            enable_regret_stability_stopping: Enable regret stability stopping condition
+            enable_max_iterations_stopping: Enable maximum iterations stopping condition
+            stopping_condition_mode: 'strict' (all conditions must be met), 
+                                     'flexible' (any condition can stop), 
+                                     'custom' (user-defined logic)
+            enable_pruning: Enable all pruning techniques
+            regret_pruning_threshold: Threshold for regret-based pruning
+            strategy_pruning_threshold: Threshold for strategy pruning
+        """
+        super().__init__(scenarios, enable_pruning, regret_pruning_threshold, strategy_pruning_threshold)
         
         # Sequential training parameters
         self.rollouts_per_visit = rollouts_per_visit
@@ -659,6 +978,21 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         self.stopping_condition_window = stopping_condition_window
         self.regret_stability_threshold = regret_stability_threshold
         self.min_rollouts_before_convergence = min_rollouts_before_convergence
+        
+        # Modular stopping conditions
+        self.enable_min_rollouts_stopping = enable_min_rollouts_stopping
+        self.enable_regret_stability_stopping = enable_regret_stability_stopping
+        self.enable_max_iterations_stopping = enable_max_iterations_stopping
+        self.stopping_condition_mode = stopping_condition_mode
+        
+        # Stopping condition tracking
+        self.stopping_reasons = defaultdict(list)  # Track why each scenario stopped
+        self.stopping_statistics = {
+            'min_rollouts_stops': 0,
+            'regret_stability_stops': 0,
+            'max_iterations_stops': 0,
+            'custom_stops': 0
+        }
         
         # Create scenario list for sequential processing
         self.scenario_list = list(self.scenarios)
@@ -679,21 +1013,97 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         print(f"🛑 Stopping condition window: {self.stopping_condition_window} iterations")
         print(f"📈 Regret stability threshold: {self.regret_stability_threshold}")
         print(f"🎯 Min rollouts before convergence: {self.min_rollouts_before_convergence}")
+        print(f"🔄 Stopping conditions: min_rollouts={self.enable_min_rollouts_stopping}, "
+              f"regret_stability={self.enable_regret_stability_stopping}, "
+              f"max_iterations={self.enable_max_iterations_stopping}")
+        print(f"🎚️ Stopping mode: {self.stopping_condition_mode}")
+        if self.enable_pruning:
+            print(f"✂️ Pruning enabled: regret_threshold={self.regret_pruning_threshold}, "
+                  f"strategy_threshold={self.strategy_pruning_threshold}")
     
-    def check_stopping_condition(self, scenario_key):
+    def check_stopping_condition(self, scenario_key, current_iteration=None):
         """
-        Check if stopping condition is met for the current scenario
-        Returns True if:
-        1. Minimum rollouts completed AND
-        2. Average regret has stabilized over the window
+        Modular stopping condition checker supporting multiple stopping criteria.
+        
+        Args:
+            scenario_key: Unique scenario identifier
+            current_iteration: Current iteration number (optional)
+            
+        Returns:
+            tuple: (should_stop: bool, stopping_reason: str)
         """
         regret_history = self.scenario_regret_history[scenario_key]
         total_rollouts = self.scenario_rollout_counts[scenario_key]
+        current_iter = current_iteration or self.scenario_iteration_counts[scenario_key]
         
-        # First check: minimum rollouts completed
-        if total_rollouts < self.min_rollouts_before_convergence:
-            return False
+        stopping_reasons = []
+        conditions_met = []
         
+        # Check minimum rollouts condition
+        if self.enable_min_rollouts_stopping:
+            min_rollouts_met = total_rollouts >= self.min_rollouts_before_convergence
+            conditions_met.append(('min_rollouts', min_rollouts_met))
+            if min_rollouts_met:
+                stopping_reasons.append("min_rollouts_met")
+        
+        # Check regret stability condition
+        if self.enable_regret_stability_stopping:
+            regret_stable = self._check_regret_stability(regret_history)
+            conditions_met.append(('regret_stability', regret_stable))
+            if regret_stable:
+                stopping_reasons.append("regret_stabilized")
+        
+        # Check maximum iterations condition
+        if self.enable_max_iterations_stopping:
+            max_iter_reached = current_iter >= self.iterations_per_scenario
+            conditions_met.append(('max_iterations', max_iter_reached))
+            if max_iter_reached:
+                stopping_reasons.append("max_iterations_reached")
+        
+        # Apply stopping condition mode logic
+        should_stop = False
+        final_reason = "unknown"
+        
+        if self.stopping_condition_mode == 'strict':
+            # All enabled conditions must be met
+            enabled_conditions = [cond for name, cond in conditions_met]
+            should_stop = all(enabled_conditions) if enabled_conditions else False
+            if should_stop:
+                final_reason = "strict_all_conditions_met"
+                self.stopping_statistics['min_rollouts_stops'] += (
+                    1 if 'min_rollouts_met' in stopping_reasons else 0)
+        
+        elif self.stopping_condition_mode == 'flexible':
+            # Any enabled condition can trigger stop (but min_rollouts is prerequisite)
+            min_rollouts_ok = (not self.enable_min_rollouts_stopping or 
+                             total_rollouts >= self.min_rollouts_before_convergence)
+            
+            other_conditions = [cond for name, cond in conditions_met if name != 'min_rollouts']
+            should_stop = min_rollouts_ok and any(other_conditions) if other_conditions else False
+            
+            if should_stop:
+                if 'regret_stabilized' in stopping_reasons:
+                    final_reason = "regret_stabilized"
+                    self.stopping_statistics['regret_stability_stops'] += 1
+                elif 'max_iterations_reached' in stopping_reasons:
+                    final_reason = "max_iterations_reached"
+                    self.stopping_statistics['max_iterations_stops'] += 1
+                else:
+                    final_reason = "flexible_condition_met"
+        
+        elif self.stopping_condition_mode == 'custom':
+            # User can override this method for custom logic
+            should_stop, final_reason = self._custom_stopping_logic(scenario_key, conditions_met, current_iter)
+            self.stopping_statistics['custom_stops'] += 1 if should_stop else 0
+        
+        # Record stopping reason for this scenario
+        if should_stop:
+            self.stopping_reasons[scenario_key].append(final_reason)
+        
+        return should_stop, final_reason
+    
+    def _check_regret_stability(self, regret_history):
+        """Check if regret has stabilized over the window."""
         # Need at least window size + buffer for meaningful comparison
         if len(regret_history) < self.stopping_condition_window + 20:
             return False
@@ -714,9 +1124,57 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         else:
             relative_change = abs(recent_avg - earlier_avg) / abs(earlier_avg)
         
-        is_stable = relative_change < self.regret_stability_threshold
+        return relative_change < self.regret_stability_threshold
+    
+    def _custom_stopping_logic(self, scenario_key, conditions_met, current_iteration):
+        """
+        Override this method to implement custom stopping logic.
         
-        return is_stable
+        Args:
+            scenario_key: Current scenario key
+            conditions_met: List of (condition_name, met) tuples
+            current_iteration: Current iteration number
+            
+        Returns:
+            tuple: (should_stop: bool, reason: str)
+        """
+        # Default implementation - can be overridden by subclasses
+        return False, "custom_not_implemented"
+    
+    def reconfigure_stopping_conditions(self, **kwargs):
+        """
+        Runtime reconfiguration of stopping conditions.
+        
+        Args:
+            **kwargs: Stopping condition parameters to update
+        """
+        valid_params = {
+            'enable_min_rollouts_stopping', 'enable_regret_stability_stopping',
+            'enable_max_iterations_stopping', 'stopping_condition_mode',
+            'min_rollouts_before_convergence', 'regret_stability_threshold',
+            'iterations_per_scenario', 'stopping_condition_window'
+        }
+        
+        for param, value in kwargs.items():
+            if param in valid_params and hasattr(self, param):
+                setattr(self, param, value)
+                print(f"🔄 Updated stopping condition: {param} = {value}")
+            else:
+                print(f"⚠️ Invalid stopping condition parameter: {param}")
+    
+    def get_stopping_statistics(self):
+        """Get comprehensive stopping condition statistics."""
+        stats = self.stopping_statistics.copy()
+        stats['total_scenarios_completed'] = len(self.completed_scenarios)
+        
+        # Calculate stopping reason distribution
+        reason_counts = {}
+        for scenario_reasons in self.stopping_reasons.values():
+            for reason in scenario_reasons:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        
+        stats['stopping_reason_distribution'] = reason_counts
+        return stats
     
     def get_current_scenario_regret(self, scenario_key):
         """Calculate current average regret for a scenario"""
@@ -805,10 +1263,11 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
             
             # Check stopping condition every batch of iterations
             if iteration_count >= self.stopping_condition_window and iteration_count % 50 == 0:
-                if self.check_stopping_condition(scenario_key):
+                should_stop, stop_reason = self.check_stopping_condition(scenario_key, iteration_count)
+                if should_stop:
                     total_rollouts = self.scenario_rollout_counts[scenario_key]
                     print(f"✅ Stopping condition met after {iteration_count} iterations "
-                          f"({total_rollouts} total rollouts, regret stabilized: {current_regret:.6f})")
+                          f"({total_rollouts} total rollouts, reason: {stop_reason}, regret: {current_regret:.6f})")
                     break
             
             # Progress logging every certain iterations
@@ -830,10 +1289,9 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
             stop_reason = "max_iterations_reached"
         elif total_rollouts < self.min_rollouts_before_convergence:
             stop_reason = f"min_rollouts_not_met ({total_rollouts}/{self.min_rollouts_before_convergence})"
-        elif self.check_stopping_condition(scenario_key):
-            stop_reason = "regret_stabilized"
         else:
-            stop_reason = "unknown"
+            should_stop, reason = self.check_stopping_condition(scenario_key, iteration_count)
+            stop_reason = reason if should_stop else "completed_normally"
         
         final_regret = self.get_current_scenario_regret(scenario_key)
         
