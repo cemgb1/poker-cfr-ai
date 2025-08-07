@@ -1,3 +1,6 @@
 scenario_key,hand_category,position,stack_category,blinds_level,iterations_completed,processing_time_seconds,processing_time_minutes,final_regret,stop_reason,regret_history_length,total_rollouts,avg_payoff,payoff_variance,payoff_min,payoff_max
-premium_pairs|BTN|ultra_short|medium,premium_pairs,BTN,ultra_short,medium,150,68.26685237884521,1.1377808729807535,194.2025000000007,regret_stabilized,150,300,1.9704166666666667,24.979801909722223,-8.0,8.375
-premium_pairs|BTN|ultra_short|low,premium_pairs,BTN,ultra_short,low,150,66.14283585548401,1.1023805975914,102.35181818181823,regret_stabilized,150,300,0.015151515151514966,27.595224977043156,-8.0,6.909090909090908
+premium_pairs|BTN|short|medium,premium_pairs,BTN,short,medium,100,23.711876392364502,0.3951979398727417,31.72999999999996,regret_stabilized,100,100,0.0,0.0,0.0,0.0
+premium_pairs|BTN|ultra_short|medium,premium_pairs,BTN,ultra_short,medium,100,23.547249794006348,0.3924541632334391,98.33958333333324,regret_stabilized,100,100,0.0,0.0,0.0,0.0
+premium_pairs|BTN|ultra_short|high,premium_pairs,BTN,ultra_short,high,100,23.513689279556274,0.3918948213259379,79.07222222222217,regret_stabilized,100,100,0.0,0.0,0.0,0.0
+premium_pairs|BTN|short|low,premium_pairs,BTN,short,low,100,23.21060538291931,0.3868434230486552,27.64999999999998,regret_stabilized,100,100,0.0,0.0,0.0,0.0
+premium_pairs|BTN|ultra_short|low,premium_pairs,BTN,ultra_short,low,100,23.064942836761475,0.3844157139460246,34.10000000000001,regret_stabilized,100,100,0.0,0.0,0.0,0.0
