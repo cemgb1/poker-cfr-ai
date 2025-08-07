@@ -295,7 +295,22 @@ class EnhancedCFRTrainer:
 
     def sample_action(self, strategy, available_actions):
         """Sample action from strategy probabilities"""
-        probs = [strategy[action] for action in available_actions]
+        probs = [strategy.get(action, 0.0) for action in available_actions]
+        
+        # Check for missing actions and log warning for debugging
+        missing_actions = [action for action in available_actions if action not in strategy]
+        if missing_actions:
+            print(f"⚠️ Warning: Actions {missing_actions} missing from strategy, using 0.0 probability")
+        
+        # Normalize probabilities to ensure they sum to 1
+        prob_sum = sum(probs)
+        if prob_sum == 0:
+            # All probabilities are 0, use uniform distribution
+            probs = [1.0 / len(available_actions)] * len(available_actions)
+        else:
+            # Normalize to sum to 1
+            probs = [p / prob_sum for p in probs]
+        
         chosen_idx = np.random.choice(len(available_actions), p=probs)
         return available_actions[chosen_idx]
 

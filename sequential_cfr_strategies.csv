@@ -1,3 +1,6 @@
-scenario_key,hand_category,example_hands,position,stack_depth,blinds_level,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
-premium_pairs|BTN|ultra_short|low,premium_pairs,"AA, KK, QQ",BTN,ultra_short,low,150,CALL_HIGH,0.364,0.264,0.0,0.0,0.364,0.124,0.124,0.124
-premium_pairs|BTN|ultra_short|medium,premium_pairs,"AA, KK, QQ",BTN,ultra_short,medium,150,RAISE_HIGH,0.357,0.098,0.0,0.0,0.12,0.13,0.295,0.357
+scenario_key,hand_category,example_hands,position,stack_depth,blinds_level,training_games,actions_pruned_count,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
+premium_pairs|BTN|short|low,premium_pairs,"AA, KK, QQ",BTN,short,low,100,0,FOLD,0.982,0.982,0.0,0.0,0.0,0.007,0.011,0.0
+premium_pairs|BTN|ultra_short|low,premium_pairs,"AA, KK, QQ",BTN,ultra_short,low,100,0,FOLD,0.98,0.98,0.0,0.0,0.0,0.01,0.01,0.0
+premium_pairs|BTN|ultra_short|high,premium_pairs,"AA, KK, QQ",BTN,ultra_short,high,100,0,RAISE_MID,0.531,0.133,0.0,0.0,0.0,0.335,0.531,0.0
+premium_pairs|BTN|short|medium,premium_pairs,"AA, KK, QQ",BTN,short,medium,100,0,RAISE_SMALL,0.511,0.027,0.0,0.0,0.0,0.511,0.462,0.0
+premium_pairs|BTN|ultra_short|medium,premium_pairs,"AA, KK, QQ",BTN,ultra_short,medium,100,0,RAISE_MID,0.446,0.213,0.0,0.0,0.0,0.341,0.446,0.0
