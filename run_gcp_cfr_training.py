@@ -193,8 +193,10 @@ class GCPCFRTrainer:
             self.logger.error(f"❌ Worker {worker_id} failed: {e}")
             self.shared_queue.put(('error', worker_id, str(e)))
     
-    def run_sequential_training(self, iterations_per_scenario=1000, 
-                              stopping_condition_window=100, regret_stability_threshold=0.01):
+    def run_sequential_training(self, iterations_per_scenario=3000, 
+                              stopping_condition_window=100, regret_stability_threshold=0.00001,
+                              min_rollouts_before_convergence=1000, 
+                              regret_pruning_threshold=-500.0, strategy_pruning_threshold=0.0001):
         """
         Run sequential training approach - processes all scenarios in order
         until each meets its stopping condition
@@ -204,14 +206,31 @@ class GCPCFRTrainer:
         self.logger.info(f"   🔄 Iterations per scenario: {iterations_per_scenario:,}")
         self.logger.info(f"   🛑 Stopping window: {stopping_condition_window}")
         self.logger.info(f"   📈 Regret threshold: {regret_stability_threshold}")
+        self.logger.info(f"   🎯 Min rollouts before convergence: {min_rollouts_before_convergence:,}")
+        self.logger.info(f"   ✂️ Regret pruning threshold: {regret_pruning_threshold}")
+        self.logger.info(f"   🎚️ Strategy pruning threshold: {strategy_pruning_threshold}")
         
         # Initialize sequential trainer
         from enhanced_cfr_trainer_v2 import SequentialScenarioTrainer
         sequential_trainer = SequentialScenarioTrainer(
             scenarios=self.scenarios,
-            iterations_per_scenario=iterations_per_scenario,
-            stopping_condition_window=stopping_condition_window,
-            regret_stability_threshold=regret_stability_threshold
+            enable_min_rollouts_stopping=True,         # Enforce a minimum per scenario
+            min_rollouts_before_convergence=min_rollouts_before_convergence,  # At least 1,000 rollouts/iterations per scenario
+
+            enable_max_iterations_stopping=True,       # Enforce a hard upper bound
+            iterations_per_scenario=iterations_per_scenario,  # At most 3,000 rollouts/iterations per scenario
+
+            enable_regret_stability_stopping=True,     # Allow early stopping if extremely stable
+            regret_stability_threshold=regret_stability_threshold,  # Very strict: almost never triggers
+
+            stopping_condition_mode='strict',          # Require all enabled conditions to be met
+
+            # Pruning (conservative/"healthy")
+            enable_pruning=True,
+            regret_pruning_threshold=regret_pruning_threshold,     # Only prune hands with very negative regret
+            strategy_pruning_threshold=strategy_pruning_threshold, # Only prune if action is super rare
+            
+            stopping_condition_window=stopping_condition_window
         )
         
         training_start_time = time.time()
@@ -583,18 +602,24 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="GCP CFR Training System")
-    parser.add_argument("--mode", choices=["parallel", "sequential"], default="parallel",
-                       help="Training mode: parallel (original) or sequential (new)")
+    parser.add_argument("--mode", choices=["parallel", "sequential"], default="sequential",
+                       help="Training mode: sequential (default, new approach) or parallel (original)")
     parser.add_argument("--iterations", type=int, default=200000,
                        help="Total iterations for parallel mode")
-    parser.add_argument("--iterations-per-scenario", type=int, default=1000,
-                       help="Iterations per scenario for sequential mode")
+    parser.add_argument("--iterations-per-scenario", type=int, default=3000,
+                       help="Maximum iterations per scenario for sequential mode (default: 3,000)")
     parser.add_argument("--stopping-window", type=int, default=100,
-                       help="Stopping condition window size for sequential mode")
-    parser.add_argument("--regret-threshold", type=float, default=0.01,
-                       help="Regret stability threshold for sequential mode")
+                       help="Stopping condition window size for sequential mode (default: 100)")
+    parser.add_argument("--regret-threshold", type=float, default=0.00001,
+                       help="Regret stability threshold for sequential mode (default: 0.00001 - very strict)")
+    parser.add_argument("--min-rollouts", type=int, default=1000,
+                       help="Minimum rollouts before convergence check (default: 1,000)")
+    parser.add_argument("--regret-pruning-threshold", type=float, default=-500.0,
+                       help="Regret pruning threshold (default: -500.0 - conservative)")
+    parser.add_argument("--strategy-pruning-threshold", type=float, default=0.0001,
+                       help="Strategy pruning threshold (default: 0.0001 - super rare actions)")
     parser.add_argument("--workers", type=int, default=None,
-                       help="Number of worker processes (default: all CPU cores)")
+                       help="Number of worker processes for parallel mode (default: all CPU cores)")
     
     args = parser.parse_args()
     
@@ -618,11 +643,17 @@ def main():
             print(f"   🔄 Iterations per scenario: {args.iterations_per_scenario:,}")
             print(f"   🛑 Stopping window: {args.stopping_window}")
             print(f"   📈 Regret threshold: {args.regret_threshold}")
+            print(f"   🎯 Min rollouts before convergence: {args.min_rollouts:,}")
+            print(f"   ✂️ Regret pruning threshold: {args.regret_pruning_threshold}")
+            print(f"   🎚️ Strategy pruning threshold: {args.strategy_pruning_threshold}")
             
             result = trainer.run_sequential_training(
                 iterations_per_scenario=args.iterations_per_scenario,
                 stopping_condition_window=args.stopping_window,
-                regret_stability_threshold=args.regret_threshold
+                regret_stability_threshold=args.regret_threshold,
+                min_rollouts_before_convergence=args.min_rollouts,
+                regret_pruning_threshold=args.regret_pruning_threshold,
+                strategy_pruning_threshold=args.strategy_pruning_threshold
             )
             
             # Sequential training handles its own exports
