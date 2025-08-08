@@ -48,6 +48,12 @@ class GCPCFRTrainer:
         # File management
         self.output_files = []
         
+        # Checkpointing configuration
+        self.checkpoints_dir = Path("checkpoints")
+        self.checkpoints_dir.mkdir(exist_ok=True)
+        self.checkpoint_interval_minutes = log_interval_minutes  # Same as log interval (15 minutes)
+        self.last_checkpoint_time = self.start_time
+        
         # Setup logging
         self.setup_logging()
         
@@ -73,6 +79,10 @@ class GCPCFRTrainer:
         self.logger.info(f"   🖥️  CPU cores: {self.n_workers}")
         self.logger.info(f"   📊 Scenarios: {len(self.scenarios):,}")
         self.logger.info(f"   📝 Log interval: {self.log_interval_minutes} minutes")
+        self.logger.info(f"   💾 Checkpoints directory: {self.checkpoints_dir}")
+        
+        # Check for existing checkpoints and offer to resume
+        self.resumed_from_checkpoint = self.prompt_checkpoint_resume()
         
     def setup_logging(self):
         """Setup comprehensive logging to file"""
@@ -142,8 +152,14 @@ class GCPCFRTrainer:
     
     def worker_train_process(self, worker_id, iterations_per_worker):
         """
-        Worker process for parallel CFR training with balanced scenario sampling
+        Worker process for parallel CFR training with balanced scenario sampling.
+        Enhanced with robust error handling and detailed exception logging.
         """
+        worker_start_time = time.time()
+        local_iteration_count = 0
+        current_scenario = None
+        current_scenario_key = None
+        
         try:
             self.logger.info(f"Worker {worker_id}: Starting {iterations_per_worker:,} iterations")
             
@@ -151,35 +167,78 @@ class GCPCFRTrainer:
             local_trainer = EnhancedCFRTrainer(scenarios=self.scenarios)
             local_trainer.start_performance_tracking()
             
-            worker_start_time = time.time()
-            local_iteration_count = 0
-            
             for iteration in range(iterations_per_worker):
-                # Use balanced scenario selection for better coverage
-                scenario = local_trainer.select_balanced_scenario()
+                try:
+                    # Use balanced scenario selection for better coverage
+                    current_scenario = local_trainer.select_balanced_scenario()
+                    current_scenario_key = local_trainer.get_scenario_key(current_scenario)
+                    
+                    # Validate scenario before processing
+                    if not self._validate_scenario(current_scenario, worker_id):
+                        continue
+                    
+                    # Train on scenario with action validation
+                    result = local_trainer.play_enhanced_scenario(current_scenario)
+                    
+                    # Validate result before updating counters
+                    if not self._validate_training_result(result, current_scenario, worker_id):
+                        continue
+                    
+                    local_trainer.scenario_counter[current_scenario_key] += 1
+                    local_iteration_count += 1
+                    
+                    # Record performance metrics periodically
+                    if iteration % 100 == 0:
+                        try:
+                            metrics = local_trainer.record_iteration_metrics(iteration)
+                            self.shared_queue.put(('metrics', worker_id, metrics))
+                        except Exception as metrics_error:
+                            # Log metrics error but don't fail the worker
+                            self.logger.warning(f"Worker {worker_id}: Metrics recording failed at iteration {iteration}: {metrics_error}")
+                    
+                    # Progress logging every 500 iterations
+                    if (iteration + 1) % 500 == 0:
+                        elapsed = time.time() - worker_start_time
+                        rate = local_iteration_count / elapsed
+                        progress_msg = f"Worker {worker_id}: {iteration+1:,}/{iterations_per_worker:,} iterations ({rate:.1f}/sec)"
+                        try:
+                            self.shared_queue.put(('progress', worker_id, progress_msg))
+                        except Exception as queue_error:
+                            # Log queue error but continue training
+                            self.logger.warning(f"Worker {worker_id}: Progress reporting failed: {queue_error}")
                 
-                # Train on scenario
-                result = local_trainer.play_enhanced_scenario(scenario)
-                scenario_key = local_trainer.get_scenario_key(scenario)
-                local_trainer.scenario_counter[scenario_key] += 1
-                local_iteration_count += 1
-                
-                # Record performance metrics periodically
-                if iteration % 100 == 0:
-                    metrics = local_trainer.record_iteration_metrics(iteration)
-                    self.shared_queue.put(('metrics', worker_id, metrics))
-                
-                # Progress logging every 500 iterations
-                if (iteration + 1) % 500 == 0:
-                    elapsed = time.time() - worker_start_time
-                    rate = local_iteration_count / elapsed
-                    progress_msg = f"Worker {worker_id}: {iteration+1:,}/{iterations_per_worker:,} iterations ({rate:.1f}/sec)"
-                    self.shared_queue.put(('progress', worker_id, progress_msg))
+                except Exception as iteration_error:
+                    # Handle individual iteration errors - log details and continue
+                    import traceback
+                    error_details = {
+                        'worker_id': worker_id,
+                        'iteration': iteration,
+                        'scenario_key': current_scenario_key,
+                        'scenario': current_scenario,
+                        'error_type': type(iteration_error).__name__,
+                        'error_message': str(iteration_error),
+                        'traceback': traceback.format_exc()
+                    }
+                    
+                    self.logger.error(f"❌ Worker {worker_id}: Iteration {iteration} failed with {type(iteration_error).__name__}: {iteration_error}")
+                    self.logger.error(f"   📊 Scenario key: {current_scenario_key}")
+                    self.logger.error(f"   🎯 Scenario details: {current_scenario}")
+                    self.logger.error(f"   🔍 Full traceback:\n{traceback.format_exc()}")
+                    
+                    # Try to report the error (but don't fail if queue is broken)
+                    try:
+                        self.shared_queue.put(('iteration_error', worker_id, error_details))
+                    except:
+                        pass  # Queue might be broken, continue anyway
+                    
+                    # Continue with next iteration rather than failing entire worker
+                    continue
             
             # Send final results back
             worker_results = {
                 'worker_id': worker_id,
-                'iterations_completed': iterations_per_worker,
+                'iterations_completed': local_iteration_count,  # Use actual count, not target
+                'iterations_attempted': iterations_per_worker,
                 'regret_sum': dict(local_trainer.regret_sum),
                 'strategy_sum': dict(local_trainer.strategy_sum),
                 'scenario_counter': dict(local_trainer.scenario_counter),
@@ -188,11 +247,87 @@ class GCPCFRTrainer:
             }
             
             self.shared_queue.put(('results', worker_id, worker_results))
-            self.logger.info(f"✅ Worker {worker_id}: Completed successfully")
+            self.logger.info(f"✅ Worker {worker_id}: Completed successfully ({local_iteration_count}/{iterations_per_worker} iterations)")
             
-        except Exception as e:
-            self.logger.error(f"❌ Worker {worker_id} failed: {e}")
-            self.shared_queue.put(('error', worker_id, str(e)))
+        except Exception as worker_error:
+            # Handle critical worker-level errors with full details
+            import traceback
+            error_details = {
+                'worker_id': worker_id,
+                'iterations_completed': local_iteration_count,
+                'current_scenario_key': current_scenario_key,
+                'current_scenario': current_scenario,
+                'error_type': type(worker_error).__name__,
+                'error_message': str(worker_error),
+                'traceback': traceback.format_exc(),
+                'elapsed_time': time.time() - worker_start_time
+            }
+            
+            self.logger.error(f"❌ Worker {worker_id}: CRITICAL FAILURE after {local_iteration_count} iterations")
+            self.logger.error(f"   💥 Error type: {type(worker_error).__name__}")
+            self.logger.error(f"   📝 Error message: {worker_error}")
+            self.logger.error(f"   📊 Last scenario key: {current_scenario_key}")
+            self.logger.error(f"   🎯 Last scenario: {current_scenario}")
+            self.logger.error(f"   ⏱️  Elapsed time: {time.time() - worker_start_time:.1f}s")
+            self.logger.error(f"   🔍 Full traceback:\n{traceback.format_exc()}")
+            
+            # Try to send error details (but worker will exit anyway)
+            try:
+                self.shared_queue.put(('worker_critical_error', worker_id, error_details))
+            except:
+                pass  # Queue might be broken, nothing we can do
+    
+    def _validate_scenario(self, scenario, worker_id):
+        """
+        Validate scenario has all required fields and values.
+        Returns True if valid, False if should skip this scenario.
+        """
+        try:
+            required_fields = ['hand_category', 'hero_position', 'stack_category', 'blinds_level']
+            for field in required_fields:
+                if field not in scenario:
+                    self.logger.warning(f"Worker {worker_id}: Invalid scenario missing field '{field}': {scenario}")
+                    return False
+            
+            # Validate actions are available
+            from enhanced_cfr_preflop_generator_v2 import ACTIONS
+            if not ACTIONS or 'fold' not in ACTIONS:
+                self.logger.error(f"Worker {worker_id}: ACTIONS dictionary missing or invalid - 'fold' not found")
+                return False
+            
+            return True
+            
+        except Exception as validation_error:
+            self.logger.error(f"Worker {worker_id}: Scenario validation failed: {validation_error}")
+            return False
+    
+    def _validate_training_result(self, result, scenario, worker_id):
+        """
+        Validate training result has expected structure.
+        Returns True if valid, False if should skip this result.
+        """
+        try:
+            if not isinstance(result, dict):
+                self.logger.warning(f"Worker {worker_id}: Invalid result type {type(result)} for scenario {scenario}")
+                return False
+            
+            required_result_fields = ['scenario_key', 'hero_action', 'villain_action', 'payoff']
+            for field in required_result_fields:
+                if field not in result:
+                    self.logger.warning(f"Worker {worker_id}: Result missing field '{field}': {result}")
+                    return False
+            
+            # Validate hero action is a known action
+            from enhanced_cfr_preflop_generator_v2 import ACTIONS
+            if result['hero_action'] not in ACTIONS:
+                self.logger.warning(f"Worker {worker_id}: Unknown hero action '{result['hero_action']}' in result")
+                return False
+            
+            return True
+            
+        except Exception as validation_error:
+            self.logger.error(f"Worker {worker_id}: Result validation failed: {validation_error}")
+            return False
     
     def run_sequential_training(self, iterations_per_scenario=1000, 
                               stopping_condition_window=100, regret_stability_threshold=0.01):
@@ -306,15 +441,39 @@ class GCPCFRTrainer:
                 elif msg_type == 'results':
                     worker_results[worker_id] = data
                     completed_workers += 1
+                    
+                    # Log completion details
+                    iterations_completed = data.get('iterations_completed', 0)
+                    iterations_attempted = data.get('iterations_attempted', 0)
+                    success_rate = (iterations_completed / iterations_attempted * 100) if iterations_attempted > 0 else 0
+                    
                     self.logger.info(f"✅ Worker {worker_id} completed ({completed_workers}/{self.n_workers})")
+                    self.logger.info(f"   📊 Iterations: {iterations_completed:,}/{iterations_attempted:,} ({success_rate:.1f}% success)")
                     
                 elif msg_type == 'error':
                     self.logger.error(f"❌ Worker {worker_id} error: {data}")
                 
-                # Periodic logging (every 15 minutes or as configured)
+                elif msg_type == 'iteration_error':
+                    # Handle detailed iteration error reports
+                    error_info = data
+                    self.logger.warning(f"⚠️  Worker {worker_id}: Iteration error at {error_info.get('iteration', 'unknown')}")
+                    self.logger.warning(f"   🎯 Scenario: {error_info.get('scenario_key', 'unknown')}")
+                    self.logger.warning(f"   💥 Error: {error_info.get('error_type', 'unknown')}: {error_info.get('error_message', 'unknown')}")
+                
+                elif msg_type == 'worker_critical_error':
+                    # Handle critical worker failure
+                    error_info = data
+                    self.logger.error(f"💥 Worker {worker_id}: CRITICAL FAILURE")
+                    self.logger.error(f"   📊 Completed {error_info.get('iterations_completed', 0)} iterations")
+                    self.logger.error(f"   🎯 Last scenario: {error_info.get('current_scenario_key', 'unknown')}")
+                    self.logger.error(f"   💥 Error: {error_info.get('error_type', 'unknown')}: {error_info.get('error_message', 'unknown')}")
+                    # Don't increment completed_workers for critical failures
+                
+                # Periodic logging and checkpointing (every 15 minutes or as configured)
                 current_time = time.time()
                 if current_time - last_log_time >= (self.log_interval_minutes * 60):
                     self.log_training_progress(current_time)
+                    self.save_checkpoint(worker_results, current_time)  # Add checkpointing
                     last_log_time = current_time
                     
             except:
@@ -353,6 +512,162 @@ class GCPCFRTrainer:
         self.logger.info(f"   📈 Performance metrics collected: {len(self.performance_metrics)}")
         self.logger.info(f"   🎯 Scenario training distribution balance in progress...")
     
+    def save_checkpoint(self, worker_results, current_time):
+        """
+        Save training state to checkpoint file for recovery.
+        Saves current strategies, regrets, performance metrics, and training progress.
+        """
+        try:
+            # Create timestamped checkpoint filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            checkpoint_file = self.checkpoints_dir / f"cfr_checkpoint_{timestamp}.pkl"
+            
+            # Combine current worker results if available
+            if worker_results:
+                self.combine_worker_results(worker_results)
+            
+            # Prepare checkpoint data
+            checkpoint_data = {
+                'timestamp': timestamp,
+                'elapsed_time': current_time - self.start_time,
+                'start_time': self.start_time,
+                'current_time': current_time,
+                'n_workers': self.n_workers,
+                'log_interval_minutes': self.log_interval_minutes,
+                'scenarios': self.scenarios,
+                'scenario_training_counts': dict(self.scenario_training_counts),
+                'performance_metrics': self.performance_metrics,
+                'iteration_count': self.iteration_count,
+                'combined_regret_sum': dict(self.combined_regret_sum) if hasattr(self, 'combined_regret_sum') else {},
+                'combined_strategy_sum': dict(self.combined_strategy_sum) if hasattr(self, 'combined_strategy_sum') else {},
+                'combined_scenario_counter': dict(self.combined_scenario_counter) if hasattr(self, 'combined_scenario_counter') else {},
+                'worker_results': worker_results,
+                'version': '1.0'  # For compatibility checking
+            }
+            
+            # Save checkpoint
+            with open(checkpoint_file, 'wb') as f:
+                pickle.dump(checkpoint_data, f)
+            
+            self.logger.info(f"💾 Checkpoint saved: {checkpoint_file}")
+            self.logger.info(f"   📊 Data size: {len(pickle.dumps(checkpoint_data)) / 1024 / 1024:.1f} MB")
+            self.logger.info(f"   ⏱️  Training time: {(current_time - self.start_time)/60:.1f} minutes")
+            
+            # Clean up old checkpoints (keep only last 5)
+            self._cleanup_old_checkpoints()
+            
+        except Exception as checkpoint_error:
+            self.logger.error(f"❌ Checkpoint save failed: {checkpoint_error}")
+            import traceback
+            self.logger.error(f"   🔍 Checkpoint error traceback:\n{traceback.format_exc()}")
+    
+    def _cleanup_old_checkpoints(self):
+        """Keep only the 5 most recent checkpoints to save disk space"""
+        try:
+            checkpoint_files = list(self.checkpoints_dir.glob("cfr_checkpoint_*.pkl"))
+            if len(checkpoint_files) > 5:
+                # Sort by modification time (newest first)
+                checkpoint_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                # Remove oldest checkpoints
+                for old_checkpoint in checkpoint_files[5:]:
+                    old_checkpoint.unlink()
+                    self.logger.info(f"   🗑️  Cleaned up old checkpoint: {old_checkpoint.name}")
+        except Exception as cleanup_error:
+            self.logger.warning(f"⚠️  Checkpoint cleanup warning: {cleanup_error}")
+    
+    def load_latest_checkpoint(self):
+        """
+        Load the most recent checkpoint if available.
+        Returns True if checkpoint was loaded, False otherwise.
+        """
+        try:
+            checkpoint_files = list(self.checkpoints_dir.glob("cfr_checkpoint_*.pkl"))
+            if not checkpoint_files:
+                self.logger.info("📁 No existing checkpoints found")
+                return False
+            
+            # Find most recent checkpoint
+            latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+            
+            self.logger.info(f"🔍 Found checkpoint: {latest_checkpoint}")
+            
+            # Load checkpoint data
+            with open(latest_checkpoint, 'rb') as f:
+                checkpoint_data = pickle.load(f)
+            
+            # Validate checkpoint version
+            if checkpoint_data.get('version') != '1.0':
+                self.logger.warning(f"⚠️  Checkpoint version mismatch: {checkpoint_data.get('version')} vs 1.0")
+                return False
+            
+            # Restore state
+            self.scenario_training_counts = Counter(checkpoint_data.get('scenario_training_counts', {}))
+            self.performance_metrics = checkpoint_data.get('performance_metrics', [])
+            self.iteration_count = checkpoint_data.get('iteration_count', 0)
+            
+            # Restore combined results if available
+            if checkpoint_data.get('combined_regret_sum'):
+                self.combined_regret_sum = defaultdict(lambda: defaultdict(float))
+                for scenario_key, regrets in checkpoint_data['combined_regret_sum'].items():
+                    for action, value in regrets.items():
+                        self.combined_regret_sum[scenario_key][action] = value
+            
+            if checkpoint_data.get('combined_strategy_sum'):
+                self.combined_strategy_sum = defaultdict(lambda: defaultdict(float))
+                for scenario_key, strategies in checkpoint_data['combined_strategy_sum'].items():
+                    for action, value in strategies.items():
+                        self.combined_strategy_sum[scenario_key][action] = value
+            
+            if checkpoint_data.get('combined_scenario_counter'):
+                self.combined_scenario_counter = Counter(checkpoint_data['combined_scenario_counter'])
+            
+            # Calculate resumed training time
+            saved_elapsed = checkpoint_data.get('elapsed_time', 0)
+            
+            self.logger.info(f"✅ Checkpoint loaded successfully!")
+            self.logger.info(f"   📅 Saved: {checkpoint_data.get('timestamp', 'unknown')}")
+            self.logger.info(f"   ⏱️  Previous training time: {saved_elapsed/60:.1f} minutes")
+            self.logger.info(f"   📊 Scenarios trained: {len(self.scenario_training_counts)}")
+            self.logger.info(f"   📈 Performance metrics: {len(self.performance_metrics)}")
+            self.logger.info(f"   🔄 Iterations completed: {self.iteration_count:,}")
+            
+            return True
+            
+        except Exception as load_error:
+            self.logger.error(f"❌ Checkpoint load failed: {load_error}")
+            import traceback
+            self.logger.error(f"   🔍 Load error traceback:\n{traceback.format_exc()}")
+            return False
+    
+    def prompt_checkpoint_resume(self):
+        """
+        Prompt user whether to resume from checkpoint or start fresh.
+        For automated GCP jobs, this will auto-resume if checkpoint exists.
+        """
+        checkpoint_files = list(self.checkpoints_dir.glob("cfr_checkpoint_*.pkl"))
+        if not checkpoint_files:
+            self.logger.info("🆕 No checkpoints found - starting fresh training")
+            return False
+        
+        latest_checkpoint = max(checkpoint_files, key=lambda x: x.stat().st_mtime)
+        checkpoint_age = time.time() - latest_checkpoint.stat().st_mtime
+        
+        self.logger.info(f"🔍 Found checkpoint: {latest_checkpoint.name}")
+        self.logger.info(f"   📅 Age: {checkpoint_age/3600:.1f} hours ago")
+        
+        # For automated/GCP environments, auto-resume from recent checkpoints
+        if checkpoint_age < 86400:  # Less than 24 hours old
+            self.logger.info("🔄 Auto-resuming from recent checkpoint (less than 24h old)")
+            return self.load_latest_checkpoint()
+        else:
+            # For older checkpoints, try to resume but don't fail if it doesn't work
+            self.logger.info("⚠️  Checkpoint is older than 24h - attempting to load anyway")
+            if self.load_latest_checkpoint():
+                return True
+            else:
+                self.logger.info("🆕 Checkpoint load failed - starting fresh training")
+                return False
+    
     def combine_worker_results(self, worker_results):
         """Combine results from all workers"""
         self.logger.info(f"🔄 Combining results from {len(worker_results)} workers...")
@@ -363,24 +678,35 @@ class GCPCFRTrainer:
         self.all_performance_metrics = []
         
         for worker_id, worker_data in worker_results.items():
-            self.logger.info(f"   Worker {worker_id}: {worker_data['iterations_completed']:,} iterations in {worker_data['final_time']:.1f}s")
+            # Safe access to worker data fields
+            iterations = worker_data.get('iterations_completed', 0)
+            final_time = worker_data.get('final_time', 0.0)
             
-            # Combine regrets
-            for scenario_key, regrets in worker_data['regret_sum'].items():
-                for action, regret_value in regrets.items():
-                    self.combined_regret_sum[scenario_key][action] += regret_value
+            self.logger.info(f"   Worker {worker_id}: {iterations:,} iterations in {final_time:.1f}s")
             
-            # Combine strategies  
-            for scenario_key, strategies in worker_data['strategy_sum'].items():
-                for action, strategy_value in strategies.items():
-                    self.combined_strategy_sum[scenario_key][action] += strategy_value
+            # Combine regrets safely
+            regret_sum = worker_data.get('regret_sum', {})
+            for scenario_key, regrets in regret_sum.items():
+                if isinstance(regrets, dict):
+                    for action, regret_value in regrets.items():
+                        self.combined_regret_sum[scenario_key][action] += regret_value
             
-            # Combine counters
-            for scenario_key, count in worker_data['scenario_counter'].items():
+            # Combine strategies safely
+            strategy_sum = worker_data.get('strategy_sum', {})
+            for scenario_key, strategies in strategy_sum.items():
+                if isinstance(strategies, dict):
+                    for action, strategy_value in strategies.items():
+                        self.combined_strategy_sum[scenario_key][action] += strategy_value
+            
+            # Combine counters safely
+            scenario_counter = worker_data.get('scenario_counter', {})
+            for scenario_key, count in scenario_counter.items():
                 self.combined_scenario_counter[scenario_key] += count
             
-            # Combine performance metrics
-            self.all_performance_metrics.extend(worker_data['performance_metrics'])
+            # Combine performance metrics safely
+            performance_metrics = worker_data.get('performance_metrics', [])
+            if isinstance(performance_metrics, list):
+                self.all_performance_metrics.extend(performance_metrics)
         
         self.logger.info(f"✅ Results combined successfully")
         self.logger.info(f"   📊 Total unique scenarios trained: {len(self.combined_scenario_counter)}")
