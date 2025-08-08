@@ -61,15 +61,21 @@ class EnhancedCFRTrainer:
     """
     
     def __init__(self, scenarios=None, enable_pruning=True, regret_pruning_threshold=-300.0, 
-                 strategy_pruning_threshold=0.001):
+                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.6):
         """
-        Initialize Enhanced CFR Trainer with optional pruning capabilities.
+        Initialize Enhanced CFR Trainer with optional pruning capabilities and tournament logic.
         
         Args:
             scenarios: Pre-generated scenarios (optional)
             enable_pruning: Enable all pruning techniques (default True)
             regret_pruning_threshold: Threshold for regret-based pruning (default -300.0)
             strategy_pruning_threshold: Threshold for strategy pruning (default 0.001)
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                       Lower values = less punishing, encourage more risk-taking
+                                       0.6 = 40% less punishing than original harsh penalties
+                                       1.0 = original harsh penalties (fold-heavy strategy)
+                                       0.3 = very aggressive, high risk-taking
+                                       Range: 0.1 to 2.0 recommended
         """
         # CFR data structures - now with variable action counts
         self.regret_sum = defaultdict(lambda: defaultdict(float))
@@ -81,6 +87,9 @@ class EnhancedCFRTrainer:
         self.enable_pruning = enable_pruning
         self.regret_pruning_threshold = regret_pruning_threshold
         self.strategy_pruning_threshold = strategy_pruning_threshold
+        
+        # Tournament survival parameters
+        self.tournament_survival_penalty = tournament_survival_penalty
         
         # Pruning tracking
         self.pruned_actions = defaultdict(set)  # Track pruned actions per scenario
@@ -118,6 +127,7 @@ class EnhancedCFRTrainer:
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
         print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
+        print(f"🎯 Tournament survival penalty: {self.tournament_survival_penalty:.1f} (lower = less punishing, more risk-taking)")
         if self.enable_pruning:
             print(f"✂️ Pruning enabled: regret_threshold={self.regret_pruning_threshold}, strategy_threshold={self.strategy_pruning_threshold}")
 
@@ -427,30 +437,47 @@ class EnhancedCFRTrainer:
             return current_bet
 
     def apply_stack_adjustments(self, base_payoff, stack_before, stack_after, busted):
-        """Apply stack-based payoff adjustments (replacing tournament logic)"""
+        """
+        Apply stack-based payoff adjustments with configurable tournament survival logic.
+        
+        The tournament_survival_penalty parameter controls how punishing it is to bust out:
+        - Lower values (0.3-0.6): Encourage risk-taking, especially on short stacks
+        - Higher values (0.8-1.0): More conservative, fold-heavy strategy  
+        - Values > 1.0: Extra punishing (discouraged for realistic tournament play)
+        
+        Example usage:
+        - trainer = EnhancedCFRTrainer(tournament_survival_penalty=0.4)  # Aggressive
+        - trainer = EnhancedCFRTrainer(tournament_survival_penalty=0.6)  # Balanced (default)
+        - trainer = EnhancedCFRTrainer(tournament_survival_penalty=0.8)  # Conservative
+        """
         stack_payoff = base_payoff
         
-        # Massive penalty for busting (severity based on stack size)
+        # Apply tournament survival penalty scaling to bust penalties
+        # Original penalties were too harsh (-8.0, -5.0, -3.0), causing over-folding
+        # New scaled penalties encourage more realistic short-stack risk-taking
         if busted:
-            if stack_before <= 15:  # Short stack bust
-                stack_payoff = -8.0   # Very bad to bust when short
+            if stack_before <= 15:  # Ultra/short stack bust
+                # Was -8.0 (extremely punishing), now -4.8 with default 0.6 factor
+                stack_payoff = -8.0 * self.tournament_survival_penalty
             elif stack_before <= 30:  # Medium stack bust  
-                stack_payoff = -5.0   # Bad to bust with medium stack
+                # Was -5.0 (very punishing), now -3.0 with default 0.6 factor
+                stack_payoff = -5.0 * self.tournament_survival_penalty
             else:
-                stack_payoff = -3.0   # Standard bust penalty
+                # Was -3.0 (punishing), now -1.8 with default 0.6 factor
+                stack_payoff = -3.0 * self.tournament_survival_penalty
         
-        # Survival bonus for short stacks
+        # Survival bonus for short stacks (unchanged - always good to survive and grow)
         if stack_before <= 15 and stack_after > stack_before:
             survival_bonus = 2.0 * (stack_after - stack_before) / stack_before
             stack_payoff += survival_bonus
         
-        # Stack preservation bonus for short stacks
+        # Stack preservation bonus for short stacks (unchanged - encourage chip preservation)
         if stack_before <= 30 and not busted:
             if stack_after >= stack_before * 0.8:  # Didn't lose much
                 preservation_bonus = 0.5
                 stack_payoff += preservation_bonus
         
-        # Chip accumulation bonus for deeper stacks
+        # Chip accumulation bonus for deeper stacks (unchanged - always good to grow)
         if stack_before > 50 and stack_after > stack_before * 1.5:
             accumulation_bonus = 1.0
             stack_payoff += accumulation_bonus
@@ -964,9 +991,9 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
                  enable_min_rollouts_stopping=True, enable_regret_stability_stopping=True,
                  enable_max_iterations_stopping=True, stopping_condition_mode='flexible',
                  enable_pruning=True, regret_pruning_threshold=-300.0, 
-                 strategy_pruning_threshold=0.001):
+                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.6):
         """
-        Initialize Sequential Scenario Trainer with modular stopping conditions and pruning.
+        Initialize Sequential Scenario Trainer with modular stopping conditions, pruning, and tournament logic.
         
         Args:
             scenarios: Pre-generated scenarios (optional)
@@ -984,8 +1011,11 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
             enable_pruning: Enable all pruning techniques
             regret_pruning_threshold: Threshold for regret-based pruning
             strategy_pruning_threshold: Threshold for strategy pruning
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                       Lower values = less punishing, encourage more risk-taking
         """
-        super().__init__(scenarios, enable_pruning, regret_pruning_threshold, strategy_pruning_threshold)
+        super().__init__(scenarios, enable_pruning, regret_pruning_threshold, 
+                        strategy_pruning_threshold, tournament_survival_penalty)
         
         # Sequential training parameters
         self.rollouts_per_visit = rollouts_per_visit
@@ -1028,6 +1058,7 @@ class SequentialScenarioTrainer(EnhancedCFRTrainer):
         print(f"🛑 Stopping condition window: {self.stopping_condition_window} iterations")
         print(f"📈 Regret stability threshold: {self.regret_stability_threshold}")
         print(f"🎯 Min rollouts before convergence: {self.min_rollouts_before_convergence}")
+        print(f"🎯 Tournament survival penalty: {self.tournament_survival_penalty:.1f} (lower = less punishing, more risk-taking)")
         print(f"🔄 Stopping conditions: min_rollouts={self.enable_min_rollouts_stopping}, "
               f"regret_stability={self.enable_regret_stability_stopping}, "
               f"max_iterations={self.enable_max_iterations_stopping}")
@@ -1547,8 +1578,28 @@ if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
     # Add a simple training function for testing
-    def run_enhanced_training(n_iterations=200000, metrics_interval=1000):
-        """Run enhanced CFR training with balanced sampling and performance tracking"""
+    def run_enhanced_training(n_iterations=200000, metrics_interval=1000, tournament_survival_penalty=0.6):
+        """
+        Run enhanced CFR training with balanced sampling and performance tracking.
+        
+        Args:
+            n_iterations: Number of training iterations
+            metrics_interval: How often to record performance metrics
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                        Lower values = less punishing, encourage more risk-taking
+                                        Higher values = more conservative, discourage busting
+                                        0.6 = 40% less punishing than original harsh penalties
+                                        
+        Example usage:
+            # Aggressive short-stack play (encourage risk-taking)
+            trainer = run_enhanced_training(tournament_survival_penalty=0.4)
+            
+            # Balanced tournament strategy (default)
+            trainer = run_enhanced_training(tournament_survival_penalty=0.6)
+            
+            # Conservative chip preservation
+            trainer = run_enhanced_training(tournament_survival_penalty=0.8)
+        """
         print(f"🚀 Running Enhanced CFR Training with Balanced Hand Category Coverage")
         print(f"Iterations: {n_iterations}")
         print(f"Metrics interval: every {metrics_interval} iterations")
@@ -1561,7 +1612,10 @@ if __name__ == "__main__":
         scenarios = generate_enhanced_scenarios()
         
         # Initialize trainer
-        trainer = EnhancedCFRTrainer(scenarios=scenarios)
+        trainer = EnhancedCFRTrainer(
+            scenarios=scenarios,
+            tournament_survival_penalty=tournament_survival_penalty
+        )
         
         # Start performance tracking
         trainer.start_performance_tracking()
@@ -1600,14 +1654,20 @@ if __name__ == "__main__":
     
     def run_sequential_training_demo(iterations_per_scenario=500, stopping_window=50, 
                                    regret_threshold=0.01, max_scenarios=5, rollouts_per_visit=1,
-                                   min_rollouts_before_convergence=100):
-        """Run sequential training demo with configurable parameters"""
+                                   min_rollouts_before_convergence=100, tournament_survival_penalty=0.6):
+        """
+        Run sequential training demo with configurable parameters.
+        
+        Args:
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                        Lower = more aggressive, higher = more conservative
+        """
         print(f"🚀 Sequential Training Demo")
         print(f"Iterations per scenario: {iterations_per_scenario}")
         print(f"Rollouts per visit: {rollouts_per_visit}")
         print(f"Stopping window: {stopping_window}")
         print(f"Regret threshold: {regret_threshold}")
-        print(f"Min rollouts before convergence: {min_rollouts_before_convergence}")
+        print(f"🎯 Tournament survival penalty: {tournament_survival_penalty}")
         print(f"Max scenarios: {max_scenarios}")
         
         # Generate scenarios
@@ -1624,7 +1684,8 @@ if __name__ == "__main__":
             iterations_per_scenario=iterations_per_scenario,
             stopping_condition_window=stopping_window,
             regret_stability_threshold=regret_threshold,
-            min_rollouts_before_convergence=min_rollouts_before_convergence
+            min_rollouts_before_convergence=min_rollouts_before_convergence,
+            tournament_survival_penalty=tournament_survival_penalty
         )
         
         # Run training
