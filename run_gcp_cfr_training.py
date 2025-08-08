@@ -4,6 +4,7 @@ GCP CFR Training Script - Production-ready CFR training with multiprocessing
 
 Features:
 - Uses all CPU cores (multiprocessing)
+- Default: 40,000 iterations per worker (total = n_workers * 40,000)
 - Samples least-trained hand groups for balanced coverage  
 - Outputs lookup-table CSV with percentage choices per action
 - Logs every 15 minutes or at least every 500 iterations
@@ -585,8 +586,8 @@ def main():
     parser = argparse.ArgumentParser(description="GCP CFR Training System")
     parser.add_argument("--mode", choices=["parallel", "sequential"], default="parallel",
                        help="Training mode: parallel (original) or sequential (new)")
-    parser.add_argument("--iterations", type=int, default=200000,
-                       help="Total iterations for parallel mode")
+    parser.add_argument("--iterations", type=int, default=None,
+                       help="Total iterations for parallel mode (default: 40,000 per worker)")
     parser.add_argument("--iterations-per-scenario", type=int, default=1000,
                        help="Iterations per scenario for sequential mode")
     parser.add_argument("--stopping-window", type=int, default=100,
@@ -607,6 +608,11 @@ def main():
         n_workers=args.workers or mp.cpu_count(),
         log_interval_minutes=15
     )
+    
+    # Calculate default iterations if not provided: 40,000 per worker
+    if args.iterations is None:
+        args.iterations = trainer.n_workers * 40000
+        print(f"💡 Using default: {args.iterations:,} total iterations (40,000 per worker × {trainer.n_workers} workers)")
     
     # Setup graceful shutdown
     setup_signal_handlers(trainer)
@@ -638,6 +644,7 @@ def main():
             print(f"📊 Parallel Training Parameters:")
             print(f"   🔢 Total iterations: {args.iterations:,}")
             print(f"   👥 Workers: {trainer.n_workers}")
+            print(f"   ⚡ Iterations per worker: {args.iterations // trainer.n_workers:,}")
             
             trainer.run_parallel_training(total_iterations=args.iterations)
             
