@@ -1578,8 +1578,28 @@ if __name__ == "__main__":
     print("Enhanced CFR Trainer v2 - Ready for training!")
     
     # Add a simple training function for testing
-    def run_enhanced_training(n_iterations=200000, metrics_interval=1000):
-        """Run enhanced CFR training with balanced sampling and performance tracking"""
+    def run_enhanced_training(n_iterations=200000, metrics_interval=1000, tournament_survival_penalty=0.6):
+        """
+        Run enhanced CFR training with balanced sampling and performance tracking.
+        
+        Args:
+            n_iterations: Number of training iterations
+            metrics_interval: How often to record performance metrics
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                        Lower values = less punishing, encourage more risk-taking
+                                        Higher values = more conservative, discourage busting
+                                        0.6 = 40% less punishing than original harsh penalties
+                                        
+        Example usage:
+            # Aggressive short-stack play (encourage risk-taking)
+            trainer = run_enhanced_training(tournament_survival_penalty=0.4)
+            
+            # Balanced tournament strategy (default)
+            trainer = run_enhanced_training(tournament_survival_penalty=0.6)
+            
+            # Conservative chip preservation
+            trainer = run_enhanced_training(tournament_survival_penalty=0.8)
+        """
         print(f"🚀 Running Enhanced CFR Training with Balanced Hand Category Coverage")
         print(f"Iterations: {n_iterations}")
         print(f"Metrics interval: every {metrics_interval} iterations")
@@ -1592,7 +1612,10 @@ if __name__ == "__main__":
         scenarios = generate_enhanced_scenarios()
         
         # Initialize trainer
-        trainer = EnhancedCFRTrainer(scenarios=scenarios)
+        trainer = EnhancedCFRTrainer(
+            scenarios=scenarios,
+            tournament_survival_penalty=tournament_survival_penalty
+        )
         
         # Start performance tracking
         trainer.start_performance_tracking()
@@ -1631,14 +1654,20 @@ if __name__ == "__main__":
     
     def run_sequential_training_demo(iterations_per_scenario=500, stopping_window=50, 
                                    regret_threshold=0.01, max_scenarios=5, rollouts_per_visit=1,
-                                   min_rollouts_before_convergence=100):
-        """Run sequential training demo with configurable parameters"""
+                                   min_rollouts_before_convergence=100, tournament_survival_penalty=0.6):
+        """
+        Run sequential training demo with configurable parameters.
+        
+        Args:
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+                                        Lower = more aggressive, higher = more conservative
+        """
         print(f"🚀 Sequential Training Demo")
         print(f"Iterations per scenario: {iterations_per_scenario}")
         print(f"Rollouts per visit: {rollouts_per_visit}")
         print(f"Stopping window: {stopping_window}")
         print(f"Regret threshold: {regret_threshold}")
-        print(f"Min rollouts before convergence: {min_rollouts_before_convergence}")
+        print(f"🎯 Tournament survival penalty: {tournament_survival_penalty}")
         print(f"Max scenarios: {max_scenarios}")
         
         # Generate scenarios
@@ -1655,7 +1684,8 @@ if __name__ == "__main__":
             iterations_per_scenario=iterations_per_scenario,
             stopping_condition_window=stopping_window,
             regret_stability_threshold=regret_threshold,
-            min_rollouts_before_convergence=min_rollouts_before_convergence
+            min_rollouts_before_convergence=min_rollouts_before_convergence,
+            tournament_survival_penalty=tournament_survival_penalty
         )
         
         # Run training
