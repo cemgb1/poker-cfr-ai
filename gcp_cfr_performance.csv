@@ -1,0 +1,7 @@
+iteration,time_per_iteration,total_elapsed_time,average_regret,max_regret,unique_scenarios_visited,scenario_coverage_0_10,scenario_coverage_11_25,scenario_coverage_26_50,scenario_coverage_51_100,scenario_coverage_100_plus,total_possible_scenarios,scenario_coverage_percentage,hand_category_weak_aces_visits,hand_category_premium_aces_visits,hand_category_premium_pairs_visits,hand_category_trash_visits,hand_category_small_pairs_visits,hand_category_medium_pairs_visits,hand_category_suited_broadway_visits,hand_category_offsuit_broadway_visits,hand_category_suited_connectors_visits,hand_category_suited_gappers_visits,hand_category_medium_aces_visits
+0,0.3676469326019287,0.3676469326019287,0.16363636363636364,0.32727272727272727,1,1,0,0,0,0,330,0.3,1.0,,,,,,,,,,
+100,22.529197454452515,22.896844387054443,0.3086080530760855,8.475,88,88,0,0,0,0,330,26.67,9.0,9.0,9.0,10.0,9.0,8.0,9.0,9.0,10.0,9.0,10.0
+200,23.455676078796387,46.35252046585083,0.3815470714101239,14.836363636363636,151,151,0,0,0,0,330,45.76,18.0,16.0,19.0,18.0,20.0,18.0,19.0,20.0,18.0,18.0,17.0
+0,0.37129712104797363,0.37129712104797363,0.03655913978494624,0.10806451612903226,1,1,0,0,0,0,330,0.3,,,,,,,,,,,1.0
+100,22.863083362579346,23.23438048362732,0.24657245486718737,7.1625,93,93,0,0,0,0,330,28.18,9.0,9.0,9.0,10.0,9.0,8.0,9.0,9.0,10.0,9.0,10.0
+200,23.682833909988403,46.91721439361572,0.30221513273236983,7.1625,159,159,0,0,0,0,330,48.18,18.0,16.0,19.0,18.0,20.0,18.0,19.0,20.0,18.0,18.0,17.0

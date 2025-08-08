@@ -189,6 +189,7 @@ class EnhancedCFRTrainer:
     def get_strategy(self, scenario_key, available_actions):
         """
         Get strategy using regret matching for available actions with optional regret-based pruning.
+        Enhanced with robust action validation and error handling.
         
         Args:
             scenario_key: Unique identifier for the scenario
@@ -197,59 +198,117 @@ class EnhancedCFRTrainer:
         Returns:
             Dictionary mapping actions to probabilities
         """
-        regrets = self.regret_sum[scenario_key]
-        
-        # Apply regret-based pruning if enabled
-        if self.enable_pruning:
-            # Check for 1% restoration chance for pruned actions
-            if random.random() < 0.01:
-                self._restore_pruned_actions(scenario_key)
+        try:
+            # Validate inputs
+            if not scenario_key:
+                raise ValueError("scenario_key cannot be empty")
+            if not available_actions:
+                raise ValueError("available_actions cannot be empty")
             
-            # Filter out actions with regret below threshold 
-            filtered_actions = []
+            # Validate all actions are known
+            from enhanced_cfr_preflop_generator_v2 import ACTIONS
             for action in available_actions:
-                action_regret = regrets.get(action, 0)
-                
-                # Include action if:
-                # 1. Regret is above threshold, OR
-                # 2. Action was previously pruned but not in current pruned set (restored)
-                if action_regret >= self.regret_pruning_threshold:
-                    filtered_actions.append(action)
-                    # Remove from pruned set if it was there (regret improved)
-                    self.pruned_actions[scenario_key].discard(action)
-                else:
-                    # Action is below threshold - add to pruned set
-                    if action not in self.pruned_actions[scenario_key]:
-                        self.pruned_actions[scenario_key].add(action)
-                        self.pruning_statistics['regret_pruned_count'] += 1
+                if action not in ACTIONS:
+                    raise ValueError(f"Unknown action '{action}' not in ACTIONS: {list(ACTIONS.keys())}")
             
-            # Ensure at least one action remains
-            if not filtered_actions:
-                # Keep the action with the highest regret, even if below threshold
-                best_action = max(available_actions, key=lambda a: regrets.get(a, 0))
-                filtered_actions = [best_action]
-                # Remove it from pruned set since we're keeping it
-                self.pruned_actions[scenario_key].discard(best_action)
-                
-            available_actions = filtered_actions
-        
-        # Only consider regrets for available (non-pruned) actions
-        action_regrets = [regrets.get(action, 0) for action in available_actions]
-        positive_regrets = np.maximum(action_regrets, 0)
-        regret_sum = np.sum(positive_regrets)
-        
-        if regret_sum > 0:
-            strategy_probs = positive_regrets / regret_sum
-        else:
-            # Uniform over available actions
-            strategy_probs = np.ones(len(available_actions)) / len(available_actions)
-        
-        # Create strategy dict
-        strategy = {}
-        for i, action in enumerate(available_actions):
-            strategy[action] = strategy_probs[i]
+            # Ensure regrets dictionary exists and is properly initialized
+            if scenario_key not in self.regret_sum:
+                self.regret_sum[scenario_key] = defaultdict(float)
             
-        return strategy
+            regrets = self.regret_sum[scenario_key]
+            
+            # Apply regret-based pruning if enabled
+            if self.enable_pruning:
+                # Check for 1% restoration chance for pruned actions
+                if random.random() < 0.01:
+                    self._restore_pruned_actions(scenario_key)
+                
+                # Filter out actions with regret below threshold 
+                filtered_actions = []
+                for action in available_actions:
+                    try:
+                        action_regret = regrets.get(action, 0.0)  # Default to 0.0 if missing
+                        
+                        # Include action if:
+                        # 1. Regret is above threshold, OR
+                        # 2. Action was previously pruned but not in current pruned set (restored)
+                        if action_regret >= self.regret_pruning_threshold:
+                            filtered_actions.append(action)
+                            # Remove from pruned set if it was there (regret improved)
+                            self.pruned_actions[scenario_key].discard(action)
+                        else:
+                            # Action is below threshold - add to pruned set
+                            if action not in self.pruned_actions[scenario_key]:
+                                self.pruned_actions[scenario_key].add(action)
+                                self.pruning_statistics['regret_pruned_count'] += 1
+                    except Exception as action_error:
+                        print(f"⚠️ Error processing action '{action}' for scenario '{scenario_key}': {action_error}")
+                        # Include action anyway to avoid complete failure
+                        filtered_actions.append(action)
+                
+                # Ensure at least one action remains
+                if not filtered_actions:
+                    # Keep the action with the highest regret, even if below threshold
+                    try:
+                        best_action = max(available_actions, key=lambda a: regrets.get(a, -float('inf')))
+                        filtered_actions = [best_action]
+                        # Remove it from pruned set since we're keeping it
+                        self.pruned_actions[scenario_key].discard(best_action)
+                    except ValueError:
+                        # If max fails, just use first action
+                        filtered_actions = [available_actions[0]]
+                        
+                available_actions = filtered_actions
+            
+            # Only consider regrets for available (non-pruned) actions
+            action_regrets = []
+            for action in available_actions:
+                try:
+                    regret_val = regrets.get(action, 0.0)
+                    action_regrets.append(regret_val)
+                except Exception as regret_error:
+                    print(f"⚠️ Error getting regret for action '{action}': {regret_error}")
+                    action_regrets.append(0.0)  # Default to 0.0
+            
+            positive_regrets = np.maximum(action_regrets, 0)
+            regret_sum = np.sum(positive_regrets)
+            
+            if regret_sum > 0:
+                strategy_probs = positive_regrets / regret_sum
+            else:
+                # Uniform over available actions
+                strategy_probs = np.ones(len(available_actions)) / len(available_actions)
+            
+            # Create strategy dict with validation
+            strategy = {}
+            for i, action in enumerate(available_actions):
+                try:
+                    prob = float(strategy_probs[i])
+                    if np.isnan(prob) or np.isinf(prob):
+                        prob = 1.0 / len(available_actions)  # Fallback to uniform
+                    strategy[action] = prob
+                except (IndexError, ValueError, TypeError) as prob_error:
+                    print(f"⚠️ Error setting probability for action '{action}': {prob_error}")
+                    strategy[action] = 1.0 / len(available_actions)  # Fallback to uniform
+                    
+            # Validate strategy sums to 1.0 (approximately)
+            total_prob = sum(strategy.values())
+            if not (0.99 <= total_prob <= 1.01):
+                print(f"⚠️ Strategy probabilities don't sum to 1.0: {total_prob}, normalizing...")
+                # Normalize
+                for action in strategy:
+                    strategy[action] /= total_prob
+                    
+            return strategy
+            
+        except Exception as strategy_error:
+            print(f"❌ Critical error in get_strategy for scenario '{scenario_key}': {strategy_error}")
+            import traceback
+            print(f"   🔍 Strategy error traceback:\n{traceback.format_exc()}")
+            
+            # Emergency fallback: return uniform strategy
+            uniform_prob = 1.0 / len(available_actions)
+            return {action: uniform_prob for action in available_actions}
     
     def _restore_pruned_actions(self, scenario_key):
         """
@@ -368,9 +427,28 @@ class EnhancedCFRTrainer:
         self.update_enhanced_regrets(scenario_key, hero_action, hero_strategy, 
                                    payoff_result, available_actions)
         
-        # Update strategy sum
-        for action in available_actions:
-            self.strategy_sum[scenario_key][action] += hero_strategy[action]
+        # Update strategy sum with validation
+        try:
+            if scenario_key not in self.strategy_sum:
+                self.strategy_sum[scenario_key] = defaultdict(float)
+                
+            for action in available_actions:
+                try:
+                    if action in hero_strategy:
+                        strategy_value = hero_strategy[action]
+                        # Validate strategy value
+                        if isinstance(strategy_value, (int, float)) and not (np.isnan(strategy_value) or np.isinf(strategy_value)):
+                            self.strategy_sum[scenario_key][action] += strategy_value
+                        else:
+                            print(f"⚠️ Invalid strategy value {strategy_value} for action '{action}', skipping")
+                    else:
+                        print(f"⚠️ Action '{action}' missing from hero_strategy for scenario '{scenario_key}'")
+                except Exception as action_error:
+                    print(f"⚠️ Error updating strategy sum for action '{action}': {action_error}")
+                    continue
+        except Exception as strategy_error:
+            print(f"❌ Error updating strategy sum for scenario '{scenario_key}': {strategy_error}")
+            # Continue without failing - strategy sum update is not critical for training progress
         
         return {
             'scenario_key': scenario_key,
@@ -549,6 +627,7 @@ class EnhancedCFRTrainer:
                               payoff_result, available_actions):
         """
         Enhanced regret update considering all available actions with regret-based pruning support.
+        Enhanced with robust error handling and action validation.
         
         Args:
             scenario_key: Unique identifier for the scenario
@@ -557,28 +636,87 @@ class EnhancedCFRTrainer:
             payoff_result: Result of the action
             available_actions: Actions that were available
         """
-        actual_payoff = payoff_result['payoff']
-        
-        # Estimate counterfactual payoffs for other actions
-        for action in available_actions:
-            # Skip regret updates for actions below pruning threshold (if pruning enabled)
-            if (self.enable_pruning and 
-                action in self.pruned_actions[scenario_key] and 
-                self.regret_sum[scenario_key][action] < self.regret_pruning_threshold):
-                continue  # Skip updating regret for pruned actions
+        try:
+            # Validate inputs
+            if not scenario_key:
+                raise ValueError("scenario_key cannot be empty")
+            if not action_taken:
+                raise ValueError("action_taken cannot be empty")
+            if not available_actions:
+                raise ValueError("available_actions cannot be empty")
+            if not isinstance(payoff_result, dict) or 'payoff' not in payoff_result:
+                raise ValueError("payoff_result must be dict with 'payoff' key")
             
-            if action == action_taken:
-                # Actual result
-                self.regret_sum[scenario_key][action] += 0  # No regret for chosen action
-            else:
-                # Estimate what would have happened
-                estimated_payoff = self.estimate_counterfactual_payoff(
-                    action, payoff_result, available_actions
-                )
+            # Validate action_taken is in available_actions
+            if action_taken not in available_actions:
+                print(f"⚠️ Action '{action_taken}' not in available actions {available_actions} for scenario '{scenario_key}'")
+                return  # Skip this update
+            
+            # Validate all actions are known
+            from enhanced_cfr_preflop_generator_v2 import ACTIONS
+            for action in available_actions:
+                if action not in ACTIONS:
+                    print(f"⚠️ Unknown action '{action}' in available_actions for scenario '{scenario_key}'")
+                    return  # Skip this update
+            
+            # Ensure regret_sum is properly initialized
+            if scenario_key not in self.regret_sum:
+                self.regret_sum[scenario_key] = defaultdict(float)
+            
+            actual_payoff = payoff_result['payoff']
+            
+            # Validate payoff is a number
+            if not isinstance(actual_payoff, (int, float)) or np.isnan(actual_payoff) or np.isinf(actual_payoff):
+                print(f"⚠️ Invalid payoff {actual_payoff} for scenario '{scenario_key}', using 0.0")
+                actual_payoff = 0.0
+            
+            # Estimate counterfactual payoffs for other actions
+            for action in available_actions:
+                try:
+                    # Skip regret updates for actions below pruning threshold (if pruning enabled)
+                    if (self.enable_pruning and 
+                        action in self.pruned_actions[scenario_key] and 
+                        self.regret_sum[scenario_key][action] < self.regret_pruning_threshold):
+                        continue  # Skip updating regret for pruned actions
+                    
+                    if action == action_taken:
+                        # Actual result - no additional regret for chosen action
+                        self.regret_sum[scenario_key][action] += 0
+                    else:
+                        # Estimate what would have happened
+                        try:
+                            estimated_payoff = self.estimate_counterfactual_payoff(
+                                action, payoff_result, available_actions
+                            )
+                            
+                            # Validate estimated payoff
+                            if not isinstance(estimated_payoff, (int, float)) or np.isnan(estimated_payoff) or np.isinf(estimated_payoff):
+                                print(f"⚠️ Invalid estimated payoff {estimated_payoff} for action '{action}', using 0.0")
+                                estimated_payoff = 0.0
+                            
+                            # Regret = what I could have got - what I actually got
+                            regret = estimated_payoff - actual_payoff
+                            
+                            # Validate regret value
+                            if np.isnan(regret) or np.isinf(regret):
+                                print(f"⚠️ Invalid regret {regret} for action '{action}', skipping update")
+                                continue
+                            
+                            self.regret_sum[scenario_key][action] += regret
+                            
+                        except Exception as counterfactual_error:
+                            print(f"⚠️ Error calculating counterfactual for action '{action}': {counterfactual_error}")
+                            continue  # Skip this action's regret update
                 
-                # Regret = what I could have got - what I actually got
-                regret = estimated_payoff - actual_payoff
-                self.regret_sum[scenario_key][action] += regret
+                except Exception as action_error:
+                    print(f"⚠️ Error processing regret for action '{action}': {action_error}")
+                    continue  # Skip this action
+                    
+        except Exception as regret_error:
+            print(f"❌ Critical error in update_enhanced_regrets for scenario '{scenario_key}': {regret_error}")
+            import traceback
+            print(f"   🔍 Regret update error traceback:\n{traceback.format_exc()}")
+            # Don't re-raise - this would crash the worker
 
     def estimate_counterfactual_payoff(self, alternative_action, actual_result, available_actions):
         """Estimate payoff if we had taken a different action"""
