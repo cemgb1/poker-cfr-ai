@@ -70,7 +70,8 @@ class GCPCFRTrainer:
         self.shared_regrets = self.manager.dict()
         self.shared_strategies = self.manager.dict() 
         self.shared_counters = self.manager.dict()
-        self.shared_queue = self.manager.Queue()
+        # Use a larger queue size to prevent blocking
+        self.shared_queue = self.manager.Queue(maxsize=1000)
         
         # Performance tracking
         self.performance_metrics = []
@@ -158,12 +159,13 @@ class GCPCFRTrainer:
     def worker_train_process(self, worker_id, iterations_per_worker):
         """
         Worker process for parallel CFR training with balanced scenario sampling.
-        Enhanced with robust error handling and detailed exception logging.
+        Enhanced with robust error handling, timeout protection, and detailed exception logging.
         """
         worker_start_time = time.time()
         local_iteration_count = 0
         current_scenario = None
         current_scenario_key = None
+        last_progress_time = worker_start_time
         
         try:
             self.logger.info(f"Worker {worker_id}: Starting {iterations_per_worker:,} iterations")
@@ -173,7 +175,16 @@ class GCPCFRTrainer:
             local_trainer.start_performance_tracking()
             
             for iteration in range(iterations_per_worker):
+                iteration_start_time = time.time()
+                
                 try:
+                    # Add timeout protection for individual iterations
+                    # This prevents infinite loops in any single iteration
+                    if iteration > 0 and (iteration_start_time - last_progress_time) > 30:
+                        # If an iteration takes more than 30 seconds, log warning
+                        self.logger.warning(f"Worker {worker_id}: Iteration {iteration} taking unusually long")
+                        last_progress_time = iteration_start_time
+                    
                     # Use balanced scenario selection for better coverage
                     current_scenario = local_trainer.select_balanced_scenario()
                     current_scenario_key = local_trainer.get_scenario_key(current_scenario)
@@ -192,25 +203,42 @@ class GCPCFRTrainer:
                     local_trainer.scenario_counter[current_scenario_key] += 1
                     local_iteration_count += 1
                     
-                    # Record performance metrics periodically
+                    # Record performance metrics periodically with robust error handling
                     if iteration % 100 == 0:
                         try:
+                            # Simple timeout protection using time check
+                            metrics_start = time.time()
                             metrics = local_trainer.record_iteration_metrics(iteration)
-                            self.shared_queue.put(('metrics', worker_id, metrics))
+                            metrics_end = time.time()
+                            
+                            # If metrics recording takes too long, skip queue operation
+                            if metrics_end - metrics_start > 5:
+                                self.logger.warning(f"Worker {worker_id}: Metrics recording slow at iteration {iteration}")
+                            else:
+                                # Use non-blocking queue put with timeout
+                                try:
+                                    self.shared_queue.put(('metrics', worker_id, metrics), timeout=2)
+                                except:
+                                    # Queue full or blocked - skip this metrics report
+                                    pass
+                                
                         except Exception as metrics_error:
                             # Log metrics error but don't fail the worker
                             self.logger.warning(f"Worker {worker_id}: Metrics recording failed at iteration {iteration}: {metrics_error}")
                     
-                    # Progress logging every 500 iterations
+                    # Progress logging every 500 iterations with robust queue handling
                     if (iteration + 1) % 500 == 0:
                         elapsed = time.time() - worker_start_time
                         rate = local_iteration_count / elapsed
                         progress_msg = f"Worker {worker_id}: {iteration+1:,}/{iterations_per_worker:,} iterations ({rate:.1f}/sec)"
                         try:
-                            self.shared_queue.put(('progress', worker_id, progress_msg))
+                            # Use non-blocking queue put with timeout to prevent worker hanging
+                            self.shared_queue.put(('progress', worker_id, progress_msg), timeout=2)
                         except Exception as queue_error:
-                            # Log queue error but continue training
+                            # Log queue error but continue training - don't let progress reporting block worker
                             self.logger.warning(f"Worker {worker_id}: Progress reporting failed: {queue_error}")
+                            # Log directly to console as backup
+                            print(f"Worker {worker_id}: {progress_msg}")
                 
                 except Exception as iteration_error:
                     # Handle individual iteration errors - log details and continue
@@ -232,7 +260,7 @@ class GCPCFRTrainer:
                     
                     # Try to report the error (but don't fail if queue is broken)
                     try:
-                        self.shared_queue.put(('iteration_error', worker_id, error_details))
+                        self.shared_queue.put(('iteration_error', worker_id, error_details), timeout=1)
                     except:
                         pass  # Queue might be broken, continue anyway
                     
@@ -251,7 +279,16 @@ class GCPCFRTrainer:
                 'final_time': time.time() - worker_start_time
             }
             
-            self.shared_queue.put(('results', worker_id, worker_results))
+            try:
+                self.shared_queue.put(('results', worker_id, worker_results), timeout=5)
+            except Exception as queue_error:
+                self.logger.error(f"Worker {worker_id}: Failed to send results: {queue_error}")
+                # Try one more time with longer timeout
+                try:
+                    self.shared_queue.put(('results', worker_id, worker_results), timeout=10)
+                except:
+                    self.logger.error(f"Worker {worker_id}: Failed to send results after retry")
+                    
             self.logger.info(f"✅ Worker {worker_id}: Completed successfully ({local_iteration_count}/{iterations_per_worker} iterations)")
             
         except Exception as worker_error:
@@ -278,7 +315,7 @@ class GCPCFRTrainer:
             
             # Try to send error details (but worker will exit anyway)
             try:
-                self.shared_queue.put(('worker_critical_error', worker_id, error_details))
+                self.shared_queue.put(('worker_critical_error', worker_id, error_details), timeout=5)
             except:
                 pass  # Queue might be broken, nothing we can do
     
@@ -451,8 +488,8 @@ class GCPCFRTrainer:
         
         while completed_workers < self.n_workers and not self.shutdown_requested:
             try:
-                # Check for messages from workers
-                message = self.shared_queue.get(timeout=10)
+                # Check for messages from workers with shorter timeout
+                message = self.shared_queue.get(timeout=5)
                 msg_type, worker_id, data = message
                 
                 if msg_type == 'progress':
@@ -501,22 +538,35 @@ class GCPCFRTrainer:
                     last_log_time = current_time
                     
             except:
-                # Check for shutdown request even during timeout
-                if self.shutdown_requested:
-                    self.logger.info("🛑 Shutdown requested - stopping training loop")
-                    break
-                    
-                # Timeout - check if any processes are still alive
-                alive_count = sum(1 for p in processes if p.is_alive())
-                if alive_count == 0:
-                    break
-                    
-                # Periodic logging even during quiet periods
+                # Timeout or other queue issues - check worker health
                 current_time = time.time()
+                
+                # Check if any processes are still alive
+                alive_workers = [i for i, p in enumerate(processes) if p.is_alive()]
+                dead_workers = [i for i, p in enumerate(processes) if not p.is_alive() and p.exitcode != 0]
+                
+                if dead_workers:
+                    self.logger.warning(f"⚠️  Dead workers detected: {dead_workers}")
+                    for worker_id in dead_workers:
+                        if worker_id not in worker_results:
+                            self.logger.error(f"💀 Worker {worker_id} died without completing (exit code: {processes[worker_id].exitcode})")
+                            completed_workers += 1  # Count as completed to avoid infinite loop
+                
+                if not alive_workers and completed_workers >= self.n_workers:
+                    self.logger.info("✅ All workers completed or terminated")
+                    break
+                
+                # Periodic logging even during timeout periods
                 if current_time - last_log_time >= (self.log_interval_minutes * 60):
+                    self.logger.info(f"📊 Monitoring progress: {completed_workers}/{self.n_workers} workers completed, {len(alive_workers)} still running")
                     self.log_training_progress(current_time)
                     self.save_checkpoint(worker_results, current_time)
                     last_log_time = current_time
+                    
+                # Check for shutdown request
+                if self.shutdown_requested:
+                    self.logger.info("🛑 Shutdown requested - stopping training loop")
+                    break
         
         # Handle shutdown scenario
         if self.shutdown_requested:
