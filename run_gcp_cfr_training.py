@@ -296,11 +296,37 @@ class GCPCFRTrainer:
                             # Log metrics error but don't fail the worker
                             self.logger.warning(f"Worker {worker_id}: Metrics recording failed at iteration {iteration}: {metrics_error}")
                     
-                    # Progress logging every 500 iterations
+                    # Enhanced progress logging every 500 iterations
                     if (iteration + 1) % 500 == 0:
                         elapsed = time.time() - worker_start_time
                         rate = local_iteration_count / elapsed
-                        progress_msg = f"Worker {worker_id}: {iteration+1:,}/{iterations_per_worker:,} iterations ({rate:.1f}/sec)"
+                        
+                        # Calculate enhanced metrics for this worker
+                        unique_scenarios = len(local_trainer.scenario_counter)
+                        total_scenarios = len(self.scenarios)
+                        scenario_coverage_pct = (unique_scenarios / total_scenarios) * 100 if total_scenarios > 0 else 0
+                        
+                        # Get memory usage for this worker process
+                        try:
+                            import psutil
+                            worker_memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                        except:
+                            worker_memory_mb = 0
+                        
+                        # Calculate average regret if available
+                        avg_regret = 0.0
+                        if hasattr(local_trainer, 'regret_sum') and local_trainer.regret_sum:
+                            all_regrets = []
+                            for scenario_regrets in local_trainer.regret_sum.values():
+                                all_regrets.extend([abs(r) for r in scenario_regrets.values()])
+                            avg_regret = sum(all_regrets) / len(all_regrets) if all_regrets else 0.0
+                        
+                        # Enhanced progress message with detailed metrics
+                        progress_msg = (f"Worker {worker_id}: {iteration+1:,}/{iterations_per_worker:,} iterations "
+                                      f"({rate:.1f}/sec) | Scenarios: {unique_scenarios}/{total_scenarios} "
+                                      f"({scenario_coverage_pct:.1f}%) | Avg Regret: {avg_regret:.6f} | "
+                                      f"Memory: {worker_memory_mb:.1f}MB")
+                        
                         try:
                             self.shared_queue.put(('progress', worker_id, progress_msg))
                         except Exception as queue_error:
@@ -551,11 +577,18 @@ class GCPCFRTrainer:
         """
         Main training loop with parallel processing and periodic logging
         """
-        self.logger.info(f"🚀 Starting GCP CFR parallel training")
-        self.logger.info(f"   🎯 Total iterations: {total_iterations:,}")
+        self.logger.info(f"🚀 ===== STARTING GCP CFR PARALLEL TRAINING =====")
+        self.logger.info(f"   🎯 Total Iterations: {total_iterations:,}")
         self.logger.info(f"   🖥️  Workers: {self.n_workers}")
-        self.logger.info(f"   ⚡ Iterations per worker: {total_iterations // self.n_workers:,}")
-        self.logger.info("=" * 80)
+        self.logger.info(f"   ⚡ Iterations per Worker: {total_iterations // self.n_workers:,}")
+        self.logger.info(f"   📊 Total Scenarios: {len(self.scenarios):,}")
+        self.logger.info(f"   📝 Enhanced Logging Features:")
+        self.logger.info(f"      • Detailed worker progress every 500 iterations")
+        self.logger.info(f"      • Scenario coverage and regret tracking")
+        self.logger.info(f"      • Memory usage monitoring per worker")
+        self.logger.info(f"      • Comprehensive checkpoint logging every {self.log_interval_minutes} minutes")
+        self.logger.info(f"      • Training progress with performance summaries")
+        self.logger.info(f"🚀 ===============================================")
         
         iterations_per_worker = total_iterations // self.n_workers
         
@@ -591,13 +624,25 @@ class GCPCFRTrainer:
                     self.current_worker_results = worker_results  # Store for emergency backup
                     completed_workers += 1
                     
-                    # Log completion details and check for incomplete iterations
+                    # Enhanced worker completion logging with detailed metrics
                     iterations_completed = data.get('iterations_completed', 0)
                     iterations_attempted = data.get('iterations_attempted', 0)
                     success_rate = (iterations_completed / iterations_attempted * 100) if iterations_attempted > 0 else 0
+                    final_time = data.get('final_time', 0.0)
+                    scenario_counter = data.get('scenario_counter', {})
+                    unique_scenarios_trained = len(scenario_counter)
+                    total_scenario_iterations = sum(scenario_counter.values())
                     
-                    self.logger.info(f"✅ Worker {worker_id} completed ({completed_workers}/{self.n_workers})")
-                    self.logger.info(f"   📊 Iterations: {iterations_completed:,}/{iterations_attempted:,} ({success_rate:.1f}% success)")
+                    self.logger.info(f"✅ ===== WORKER {worker_id} COMPLETED =====")
+                    self.logger.info(f"   📊 Progress: {completed_workers}/{self.n_workers} workers finished")
+                    self.logger.info(f"   🔄 Iterations: {iterations_completed:,}/{iterations_attempted:,} ({success_rate:.1f}% success)")
+                    self.logger.info(f"   ⏱️  Training Time: {final_time:.1f} seconds ({final_time/60:.1f} minutes)")
+                    self.logger.info(f"   🎯 Unique Scenarios: {unique_scenarios_trained:,}")
+                    self.logger.info(f"   📈 Total Scenario Training: {total_scenario_iterations:,}")
+                    if final_time > 0:
+                        rate = iterations_completed / final_time
+                        self.logger.info(f"   ⚡ Training Rate: {rate:.1f} iterations/second")
+                    self.logger.info(f"✅ =======================================")
                     
                     # Check for incomplete iterations and log as critical error
                     if iterations_completed < iterations_attempted:
@@ -722,12 +767,28 @@ class GCPCFRTrainer:
         # Combine results
         self.combine_worker_results(worker_results)
         
-        # Final logging
+        # Enhanced final logging with comprehensive training summary
         total_time = time.time() - self.start_time
-        self.logger.info(f"🏆 Training completed successfully!")
-        self.logger.info(f"⏱️  Total time: {total_time:.1f} seconds ({total_time/60:.1f} minutes)")
-        self.logger.info(f"🎮 Total iterations: {total_iterations:,}")
-        self.logger.info(f"⚡ Average rate: {total_iterations/total_time:.1f} iterations/second")
+        total_scenarios_trained = len(self.combined_scenario_counter) if hasattr(self, 'combined_scenario_counter') else 0
+        total_training_iterations = sum(self.combined_scenario_counter.values()) if hasattr(self, 'combined_scenario_counter') else 0
+        
+        self.logger.info(f"🏆 ===== TRAINING COMPLETED SUCCESSFULLY =====")
+        self.logger.info(f"   ⏱️  Total Time: {total_time:.1f} seconds ({total_time/60:.1f} minutes, {total_time/3600:.2f} hours)")
+        self.logger.info(f"   🔄 Target Iterations: {total_iterations:,}")
+        self.logger.info(f"   📊 Actual Training Iterations: {total_training_iterations:,}")
+        self.logger.info(f"   🎯 Unique Scenarios Trained: {total_scenarios_trained:,}/{len(self.scenarios):,}")
+        if len(self.scenarios) > 0:
+            scenario_coverage_pct = (total_scenarios_trained / len(self.scenarios)) * 100
+            self.logger.info(f"   📈 Scenario Coverage: {scenario_coverage_pct:.1f}%")
+        if total_time > 0:
+            avg_rate = total_training_iterations / total_time
+            self.logger.info(f"   ⚡ Average Training Rate: {avg_rate:.1f} iterations/second")
+        if total_scenarios_trained > 0:
+            avg_iterations_per_scenario = total_training_iterations / total_scenarios_trained
+            self.logger.info(f"   📊 Avg Iterations per Scenario: {avg_iterations_per_scenario:.1f}")
+        self.logger.info(f"   🖥️  Workers Used: {self.n_workers}")
+        self.logger.info(f"   📝 Performance Metrics Collected: {len(self.performance_metrics)}")
+        self.logger.info(f"🏆 ==========================================")
         
         return worker_results
     
@@ -759,13 +820,44 @@ class GCPCFRTrainer:
             system_memory_used_pct = 0
             cpu_percent = 0
         
-        self.logger.info(f"📊 Training Progress Update")
-        self.logger.info(f"   ⏱️  Elapsed time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.1f} hours)")
-        self.logger.info(f"   📈 Performance metrics collected: {len(self.performance_metrics)}")
-        self.logger.info(f"   🎯 Scenario training distribution balance in progress...")
-        self.logger.info(f"   💾 Process memory usage: {memory_mb:.1f} MB")
-        self.logger.info(f"   🖥️  System memory: {system_memory_used_pct:.1f}% of {system_memory_gb:.1f} GB used")
-        self.logger.info(f"   ⚡ CPU usage: {cpu_percent:.1f}%")
+        self.logger.info(f"📊 ===== TRAINING PROGRESS UPDATE =====")
+        self.logger.info(f"   ⏱️  Elapsed Time: {elapsed_time/60:.1f} minutes ({elapsed_time/3600:.2f} hours)")
+        self.logger.info(f"   💾 Process Memory: {memory_mb:.1f} MB")
+        self.logger.info(f"   🖥️  System Memory: {system_memory_used_pct:.1f}% of {system_memory_gb:.1f} GB used")
+        self.logger.info(f"   ⚡ CPU Usage: {cpu_percent:.1f}%")
+        
+        # Enhanced scenario and training metrics
+        if hasattr(self, 'combined_scenario_counter') and self.combined_scenario_counter:
+            total_trained_scenarios = len(self.combined_scenario_counter)
+            total_training_iterations = sum(self.combined_scenario_counter.values())
+            avg_iterations_per_scenario = total_training_iterations / total_trained_scenarios if total_trained_scenarios > 0 else 0
+            
+            # Calculate scenario coverage percentage
+            total_possible_scenarios = len(self.scenarios)
+            scenario_coverage_pct = (total_trained_scenarios / total_possible_scenarios) * 100 if total_possible_scenarios > 0 else 0
+            
+            # Calculate average regret across all scenarios
+            avg_regret = 0.0
+            if hasattr(self, 'combined_regret_sum') and self.combined_regret_sum:
+                all_regrets = []
+                for scenario_regrets in self.combined_regret_sum.values():
+                    if isinstance(scenario_regrets, dict):
+                        all_regrets.extend([abs(r) for r in scenario_regrets.values()])
+                avg_regret = sum(all_regrets) / len(all_regrets) if all_regrets else 0.0
+            
+            # Calculate training rate
+            training_rate = total_training_iterations / elapsed_time if elapsed_time > 0 else 0
+            
+            self.logger.info(f"   🎯 Unique Scenarios Trained: {total_trained_scenarios:,}/{total_possible_scenarios:,} ({scenario_coverage_pct:.1f}%)")
+            self.logger.info(f"   🔄 Total Training Iterations: {total_training_iterations:,}")
+            self.logger.info(f"   📈 Avg Iterations per Scenario: {avg_iterations_per_scenario:.1f}")
+            self.logger.info(f"   📊 Overall Average Regret: {avg_regret:.6f}")
+            self.logger.info(f"   ⚡ Training Rate: {training_rate:.1f} iterations/second")
+        else:
+            self.logger.info(f"   🔄 Training in progress - worker results not yet combined")
+        
+        self.logger.info(f"   📈 Performance Metrics Collected: {len(self.performance_metrics)}")
+        self.logger.info(f"📊 =====================================")
         
         # Memory usage warnings for long-running jobs
         if memory_mb > 1000:  # More than 1GB
@@ -775,16 +867,6 @@ class GCPCFRTrainer:
         if system_memory_used_pct > 90:
             self.logger.warning(f"⚠️ System memory critically low: {system_memory_used_pct:.1f}% used")
             self.logger.warning(f"   💡 System may become unstable - consider reducing workload")
-        
-        # Log worker progress if available
-        if hasattr(self, 'combined_scenario_counter') and self.combined_scenario_counter:
-            total_trained_scenarios = len(self.combined_scenario_counter)
-            total_training_iterations = sum(self.combined_scenario_counter.values())
-            avg_iterations_per_scenario = total_training_iterations / total_trained_scenarios if total_trained_scenarios > 0 else 0
-            
-            self.logger.info(f"   📊 Scenarios trained: {total_trained_scenarios}/330 ({total_trained_scenarios/330*100:.1f}%)")
-            self.logger.info(f"   🔄 Total training iterations: {total_training_iterations:,}")
-            self.logger.info(f"   📈 Avg iterations per scenario: {avg_iterations_per_scenario:.1f}")
     
     def save_checkpoint(self, worker_results, current_time):
         """
@@ -829,9 +911,39 @@ class GCPCFRTrainer:
             with open(checkpoint_file, 'wb') as f:
                 pickle.dump(checkpoint_data, f)
             
-            self.logger.info(f"💾 Checkpoint saved: {checkpoint_file}")
-            self.logger.info(f"   📊 Data size: {len(pickle.dumps(checkpoint_data)) / 1024 / 1024:.1f} MB")
-            self.logger.info(f"   ⏱️  Training time: {(current_time - self.start_time)/60:.1f} minutes")
+            # Get file size for checkpoint logging
+            checkpoint_size_mb = checkpoint_file.stat().st_size / (1024 * 1024)
+            
+            # Calculate comprehensive checkpoint metrics
+            total_scenarios_covered = len(checkpoint_data.get('combined_scenario_counter', {}))
+            total_iterations_completed = sum(checkpoint_data.get('combined_scenario_counter', {}).values())
+            elapsed_minutes = (current_time - self.start_time) / 60
+            elapsed_hours = elapsed_minutes / 60
+            
+            # Calculate average regret if available
+            avg_regret = 0.0
+            if checkpoint_data.get('combined_regret_sum'):
+                all_regrets = []
+                for scenario_regrets in checkpoint_data['combined_regret_sum'].values():
+                    if isinstance(scenario_regrets, dict):
+                        all_regrets.extend([abs(r) for r in scenario_regrets.values()])
+                avg_regret = sum(all_regrets) / len(all_regrets) if all_regrets else 0.0
+            
+            # Calculate scenario coverage percentage
+            total_possible_scenarios = len(self.scenarios)
+            scenario_coverage_pct = (total_scenarios_covered / total_possible_scenarios) * 100 if total_possible_scenarios > 0 else 0
+            
+            # Enhanced checkpoint logging with comprehensive details
+            self.logger.info(f"💾 ===== CHECKPOINT SAVED =====")
+            self.logger.info(f"   📁 File: {checkpoint_file.name}")
+            self.logger.info(f"   📊 Size: {checkpoint_size_mb:.2f} MB")
+            self.logger.info(f"   ⏱️  Elapsed Time: {elapsed_minutes:.1f} minutes ({elapsed_hours:.2f} hours)")
+            self.logger.info(f"   🔄 Total Iterations: {total_iterations_completed:,}")
+            self.logger.info(f"   🎯 Scenarios Covered: {total_scenarios_covered}/{total_possible_scenarios} ({scenario_coverage_pct:.1f}%)")
+            self.logger.info(f"   📈 Average Regret: {avg_regret:.6f}")
+            self.logger.info(f"   📝 Performance Metrics: {len(checkpoint_data.get('performance_metrics', []))} data points")
+            self.logger.info(f"   🏷️  Timestamp: {timestamp}")
+            self.logger.info(f"💾 =============================")
             
             # Clean up old checkpoints to save disk space (keep only last 5)
             self._cleanup_old_checkpoints()
