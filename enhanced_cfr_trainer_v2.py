@@ -83,6 +83,9 @@ class EnhancedCFRTrainer:
         self.scenario_counter = Counter()
         self.iterations = 0
 
+        # Cache the Evaluator instance to avoid expensive reinitializations
+        self.evaluator = Evaluator()
+        
         # Pruning parameters
         self.enable_pruning = enable_pruning
         self.regret_pruning_threshold = regret_pruning_threshold
@@ -602,7 +605,7 @@ class EnhancedCFRTrainer:
             return random.choice(["fold", "call_small", "raise_small"])
 
     def estimate_villain_equity(self, villain_cards, simulations=50):
-        """Quick equity estimation for villain"""
+        """Quick equity estimation for villain using cached evaluator"""
         wins = 0
         for _ in range(simulations):
             deck = Deck()
@@ -614,9 +617,9 @@ class EnhancedCFRTrainer:
             hero_cards = deck.draw(2)
             board = deck.draw(5)
             
-            evaluator = Evaluator()
-            villain_score = evaluator.evaluate(villain_cards, board)
-            hero_score = evaluator.evaluate(hero_cards, board)
+            # Use cached evaluator instead of creating new one
+            villain_score = self.evaluator.evaluate(villain_cards, board)
+            hero_score = self.evaluator.evaluate(hero_cards, board)
             
             if villain_score < hero_score:
                 wins += 1
