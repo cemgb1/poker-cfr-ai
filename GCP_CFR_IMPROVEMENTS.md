@@ -142,5 +142,75 @@ checkpoint_data = {
 - ✅ Confirmed 'fold' action and all actions are properly handled
 - ✅ Validated error handling doesn't crash workers on iteration failures
 - ✅ Memory monitoring and graceful shutdown working correctly
+- ✅ Enhanced error logging system tested and working properly
+
+## Enhanced Error Logging System
+
+### 6. Dedicated Error Logging Infrastructure
+
+**Centralized Error Logging:**
+- Added dedicated `logs/errors.log` file for all error information
+- Plain text format with structured fields for easy parsing and analysis
+- All exceptions (iteration-level, worker-level, and process-level) logged to errors.log
+- Comprehensive error context including timestamp, worker ID, iteration, scenario details
+
+**Error Log Format:**
+```
+TIMESTAMP: 2025-08-09 07:52:47
+WORKER_ID: 1
+ITERATION: 100
+ERROR_TYPE: KeyError
+MESSAGE: 'fold' action not found in available actions
+SCENARIO_CONTEXT: Key: premium_pairs_BTN_medium_low, Details: {...}
+TRACEBACK:
+[Full Python traceback]
+================================================================================
+```
+
+**Uncaught Exception Handling:**
+- Implemented `sys.excepthook` to capture all unhandled exceptions
+- Process-level crashes are automatically logged to errors.log
+- Excludes KeyboardInterrupt (Ctrl+C) from error logging
+- Provides complete traceback information for debugging
+
+**Worker Completion Monitoring:**
+- Detects workers that complete fewer iterations than assigned
+- Logs abnormal process exit codes as critical errors
+- Identifies silent worker failures (no results reported)
+- Comprehensive exit status monitoring for all worker processes
+
+**Error Types Logged:**
+- `iteration_error`: Individual training iteration failures with full context
+- `worker_critical_error`: Critical worker failures requiring attention
+- `WorkerIncompleteError`: Workers completing fewer iterations than assigned
+- `WorkerAbnormalExit`: Workers exiting with non-zero exit codes
+- `WorkerSilentFailure`: Workers that never report completion results
+- All uncaught exceptions via sys.excepthook
+
+**Integration with Existing System:**
+- Error logging works alongside existing log files (no disruption)
+- All errors are logged to both standard logs AND errors.log
+- Maintains all existing functionality while adding error tracking
+- Error log file is automatically included in output file management
+
+### Usage Examples
+
+**Checking for Errors After Training:**
+```bash
+# View all errors from latest training session
+cat logs/errors.log
+
+# Count error occurrences by type
+grep "ERROR_TYPE:" logs/errors.log | sort | uniq -c
+
+# Find worker-specific errors
+grep "WORKER_ID: 3" logs/errors.log
+```
+
+**Error Log Analysis:**
+- Each error entry is separated by a line of equals signs (80 characters)
+- Structured format allows for easy parsing by monitoring tools
+- Scenario context provides exact reproduction information
+- Full tracebacks enable detailed debugging
 
 All changes maintain existing functionality while significantly improving robustness for long-running GCP jobs.

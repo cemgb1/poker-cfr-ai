@@ -90,7 +90,7 @@ class GCPCFRTrainer:
         self.resumed_from_checkpoint = self.prompt_checkpoint_resume()
         
     def setup_logging(self):
-        """Setup comprehensive logging to file"""
+        """Setup comprehensive logging to file and dedicated error logging"""
         # Create logs directory if it doesn't exist
         os.makedirs('logs', exist_ok=True)
         
@@ -112,8 +112,103 @@ class GCPCFRTrainer:
         self.log_filename = log_filename
         self.output_files.append(log_filename)
         
+        # Setup dedicated error logging
+        self.setup_error_logging()
+        
         self.logger.info("🔧 Logging system initialized")
         self.logger.info(f"📝 Log file: {log_filename}")
+        self.logger.info(f"🚨 Error log file: {self.error_log_filename}")
+    
+    def setup_error_logging(self):
+        """Setup dedicated error logging to errors.log file"""
+        # Error log file path
+        self.error_log_filename = "logs/errors.log"
+        self.output_files.append(self.error_log_filename)
+        
+        # Create error logger with plain text format
+        self.error_logger = logging.getLogger('error_logger')
+        self.error_logger.setLevel(logging.ERROR)
+        
+        # Remove any existing handlers to avoid duplicates
+        for handler in self.error_logger.handlers[:]:
+            self.error_logger.removeHandler(handler)
+        
+        # Create error file handler with plain text format
+        error_handler = logging.FileHandler(self.error_log_filename, mode='a')
+        error_formatter = logging.Formatter('%(message)s')  # Plain text format
+        error_handler.setFormatter(error_formatter)
+        self.error_logger.addHandler(error_handler)
+        
+        # Prevent propagation to avoid duplicate logging
+        self.error_logger.propagate = False
+        
+        # Setup sys.excepthook for uncaught exceptions
+        self.setup_excepthook()
+    
+    def setup_excepthook(self):
+        """Setup sys.excepthook to log uncaught exceptions to errors.log"""
+        def excepthook(exc_type, exc_value, exc_traceback):
+            # Don't log KeyboardInterrupt as an error
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            
+            # Format the error for errors.log
+            import traceback
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            error_entry = (
+                f"TIMESTAMP: {timestamp}\n"
+                f"WORKER_ID: main_process\n"
+                f"ITERATION: N/A\n"
+                f"ERROR_TYPE: {exc_type.__name__}\n"
+                f"MESSAGE: {str(exc_value)}\n"
+                f"SCENARIO_CONTEXT: N/A\n"
+                f"TRACEBACK:\n{''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))}\n"
+                f"{'='*80}\n"
+            )
+            self.error_logger.error(error_entry)
+            
+            # Call the default handler
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        
+        sys.excepthook = excepthook
+    
+    def log_error_to_file(self, error_type, message, worker_id=None, iteration=None, 
+                         scenario_context=None, traceback_str=None, exit_code=None):
+        """
+        Log error details to dedicated errors.log file in plain text format.
+        
+        Args:
+            error_type: Type of error (e.g., 'KeyError', 'WorkerExitError')
+            message: Error message
+            worker_id: Worker ID if applicable
+            iteration: Current iteration if applicable
+            scenario_context: Scenario context if applicable
+            traceback_str: Full traceback string if applicable
+            exit_code: Process exit code if applicable
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        error_entry = (
+            f"TIMESTAMP: {timestamp}\n"
+            f"WORKER_ID: {worker_id or 'N/A'}\n"
+            f"ITERATION: {iteration or 'N/A'}\n"
+            f"ERROR_TYPE: {error_type}\n"
+            f"MESSAGE: {message}\n"
+            f"SCENARIO_CONTEXT: {scenario_context or 'N/A'}\n"
+        )
+        
+        if exit_code is not None:
+            error_entry += f"EXIT_CODE: {exit_code}\n"
+        
+        if traceback_str:
+            error_entry += f"TRACEBACK:\n{traceback_str}\n"
+        else:
+            error_entry += f"TRACEBACK: N/A\n"
+        
+        error_entry += f"{'='*80}\n"
+        
+        self.error_logger.error(error_entry)
         
     def get_balanced_scenario_batch(self, batch_size=1000):
         """
@@ -215,6 +310,8 @@ class GCPCFRTrainer:
                 except Exception as iteration_error:
                     # Handle individual iteration errors - log details and continue
                     import traceback
+                    traceback_str = traceback.format_exc()
+                    
                     error_details = {
                         'worker_id': worker_id,
                         'iteration': iteration,
@@ -222,13 +319,25 @@ class GCPCFRTrainer:
                         'scenario': current_scenario,
                         'error_type': type(iteration_error).__name__,
                         'error_message': str(iteration_error),
-                        'traceback': traceback.format_exc()
+                        'traceback': traceback_str
                     }
                     
+                    # Log to standard log
                     self.logger.error(f"❌ Worker {worker_id}: Iteration {iteration} failed with {type(iteration_error).__name__}: {iteration_error}")
                     self.logger.error(f"   📊 Scenario key: {current_scenario_key}")
                     self.logger.error(f"   🎯 Scenario details: {current_scenario}")
-                    self.logger.error(f"   🔍 Full traceback:\n{traceback.format_exc()}")
+                    self.logger.error(f"   🔍 Full traceback:\n{traceback_str}")
+                    
+                    # Log to dedicated errors.log file
+                    scenario_context = f"Key: {current_scenario_key}, Details: {current_scenario}"
+                    self.log_error_to_file(
+                        error_type=type(iteration_error).__name__,
+                        message=str(iteration_error),
+                        worker_id=worker_id,
+                        iteration=iteration,
+                        scenario_context=scenario_context,
+                        traceback_str=traceback_str
+                    )
                     
                     # Try to report the error (but don't fail if queue is broken)
                     try:
@@ -257,6 +366,9 @@ class GCPCFRTrainer:
         except Exception as worker_error:
             # Handle critical worker-level errors with full details
             import traceback
+            traceback_str = traceback.format_exc()
+            elapsed_time = time.time() - worker_start_time
+            
             error_details = {
                 'worker_id': worker_id,
                 'iterations_completed': local_iteration_count,
@@ -264,17 +376,30 @@ class GCPCFRTrainer:
                 'current_scenario': current_scenario,
                 'error_type': type(worker_error).__name__,
                 'error_message': str(worker_error),
-                'traceback': traceback.format_exc(),
-                'elapsed_time': time.time() - worker_start_time
+                'traceback': traceback_str,
+                'elapsed_time': elapsed_time
             }
             
+            # Log to standard log
             self.logger.error(f"❌ Worker {worker_id}: CRITICAL FAILURE after {local_iteration_count} iterations")
             self.logger.error(f"   💥 Error type: {type(worker_error).__name__}")
             self.logger.error(f"   📝 Error message: {worker_error}")
             self.logger.error(f"   📊 Last scenario key: {current_scenario_key}")
             self.logger.error(f"   🎯 Last scenario: {current_scenario}")
-            self.logger.error(f"   ⏱️  Elapsed time: {time.time() - worker_start_time:.1f}s")
-            self.logger.error(f"   🔍 Full traceback:\n{traceback.format_exc()}")
+            self.logger.error(f"   ⏱️  Elapsed time: {elapsed_time:.1f}s")
+            self.logger.error(f"   🔍 Full traceback:\n{traceback_str}")
+            
+            # Log to dedicated errors.log file
+            scenario_context = f"Key: {current_scenario_key}, Details: {current_scenario}"
+            message = f"Worker critical failure after {local_iteration_count} iterations: {worker_error}"
+            self.log_error_to_file(
+                error_type="WorkerCriticalError",
+                message=message,
+                worker_id=worker_id,
+                iteration=local_iteration_count,
+                scenario_context=scenario_context,
+                traceback_str=traceback_str
+            )
             
             # Try to send error details (but worker will exit anyway)
             try:
@@ -466,13 +591,29 @@ class GCPCFRTrainer:
                     self.current_worker_results = worker_results  # Store for emergency backup
                     completed_workers += 1
                     
-                    # Log completion details
+                    # Log completion details and check for incomplete iterations
                     iterations_completed = data.get('iterations_completed', 0)
                     iterations_attempted = data.get('iterations_attempted', 0)
                     success_rate = (iterations_completed / iterations_attempted * 100) if iterations_attempted > 0 else 0
                     
                     self.logger.info(f"✅ Worker {worker_id} completed ({completed_workers}/{self.n_workers})")
                     self.logger.info(f"   📊 Iterations: {iterations_completed:,}/{iterations_attempted:,} ({success_rate:.1f}% success)")
+                    
+                    # Check for incomplete iterations and log as critical error
+                    if iterations_completed < iterations_attempted:
+                        incomplete_count = iterations_attempted - iterations_completed
+                        incomplete_rate = (incomplete_count / iterations_attempted * 100) if iterations_attempted > 0 else 0
+                        
+                        error_message = (f"Worker completed fewer iterations than assigned. "
+                                       f"Missing {incomplete_count:,} iterations ({incomplete_rate:.1f}% incomplete)")
+                        
+                        self.log_error_to_file(
+                            error_type="WorkerIncompleteError",
+                            message=error_message,
+                            worker_id=worker_id,
+                            iteration=iterations_completed,
+                            scenario_context=f"Expected: {iterations_attempted}, Completed: {iterations_completed}"
+                        )
                     
                 elif msg_type == 'error':
                     self.logger.error(f"❌ Worker {worker_id} error: {data}")
@@ -536,9 +677,47 @@ class GCPCFRTrainer:
                     p.kill()
                     self.logger.warning(f"   💀 Force killed worker process {p.pid}")
         else:
-            # Normal completion - wait for all processes to complete
-            for p in processes:
+            # Normal completion - wait for all processes to complete and check exit codes
+            for i, p in enumerate(processes):
                 p.join()
+                exit_code = p.exitcode
+                
+                # Check for abnormal exit codes
+                if exit_code != 0:
+                    # Find the last known iteration for this worker
+                    worker_id = i
+                    last_iteration = 0
+                    if worker_id in worker_results:
+                        last_iteration = worker_results[worker_id].get('iterations_completed', 0)
+                    
+                    error_message = f"Worker process exited abnormally with exit code {exit_code}"
+                    
+                    # Log abnormal exit as critical error
+                    self.log_error_to_file(
+                        error_type="WorkerAbnormalExit",
+                        message=error_message,
+                        worker_id=worker_id,
+                        iteration=last_iteration,
+                        scenario_context=f"Process ID: {p.pid}",
+                        exit_code=exit_code
+                    )
+                    
+                    self.logger.error(f"❌ Worker {worker_id}: Process exited abnormally with code {exit_code}")
+        
+        # Check for workers that never reported results (silent failures)
+        for worker_id in range(self.n_workers):
+            if worker_id not in worker_results:
+                error_message = f"Worker never reported completion results (silent failure)"
+                
+                self.log_error_to_file(
+                    error_type="WorkerSilentFailure",
+                    message=error_message,
+                    worker_id=worker_id,
+                    iteration=0,
+                    scenario_context="Worker never sent results through queue"
+                )
+                
+                self.logger.error(f"❌ Worker {worker_id}: Silent failure - no results received")
         
         # Combine results
         self.combine_worker_results(worker_results)
