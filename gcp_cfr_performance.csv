@@ -1,3 +1,2 @@
-iteration,time_per_iteration,total_elapsed_time,average_regret,max_regret,unique_scenarios_visited,scenario_coverage_0_10,scenario_coverage_11_25,scenario_coverage_26_50,scenario_coverage_51_100,scenario_coverage_100_plus,total_possible_scenarios,scenario_coverage_percentage,hand_category_medium_pairs_visits,hand_category_medium_aces_visits
-0,0.2282850742340088,0.2282850742340088,0.18958333333333333,0.490625,1,1,0,0,0,0,330,0.3,1.0,
-0,0.23392200469970703,0.23392200469970703,0.03333333333333333,0.1,1,1,0,0,0,0,330,0.3,,1.0
+iteration,time_per_iteration,total_elapsed_time,average_regret,max_regret,unique_scenarios_visited,scenario_coverage_0_10,scenario_coverage_11_25,scenario_coverage_26_50,scenario_coverage_51_100,scenario_coverage_100_plus,total_possible_scenarios,scenario_coverage_percentage,hand_category_weak_aces_visits
+0,0.21606016159057617,0.21606016159057617,0.3,0.6,1,1,0,0,0,0,330,0.3,1

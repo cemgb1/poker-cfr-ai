@@ -263,8 +263,9 @@ class GCPCFRTrainer:
         try:
             self.logger.info(f"Worker {worker_id}: Starting {iterations_per_worker:,} iterations")
             
-            # Create local CFR trainer for this worker
-            local_trainer = EnhancedCFRTrainer(scenarios=self.scenarios)
+            # Create local CFR trainer for this worker with reduced tournament penalty
+            # tournament_survival_penalty=0.2 encourages more risk-taking vs default 0.6
+            local_trainer = EnhancedCFRTrainer(scenarios=self.scenarios, tournament_survival_penalty=0.2)
             local_trainer.start_performance_tracking()
             
             for iteration in range(iterations_per_worker):
@@ -489,13 +490,14 @@ class GCPCFRTrainer:
         self.logger.info(f"   🛑 Stopping window: {stopping_condition_window}")
         self.logger.info(f"   📈 Regret threshold: {regret_stability_threshold}")
         
-        # Initialize sequential trainer
+        # Initialize sequential trainer with reduced tournament penalty
         from enhanced_cfr_trainer_v2 import SequentialScenarioTrainer
         sequential_trainer = SequentialScenarioTrainer(
             scenarios=self.scenarios,
             iterations_per_scenario=iterations_per_scenario,
             stopping_condition_window=stopping_condition_window,
-            regret_stability_threshold=regret_stability_threshold
+            regret_stability_threshold=regret_stability_threshold,
+            tournament_survival_penalty=0.2  # Reduced from default 0.6 for more risk-taking
         )
         
         training_start_time = time.time()
@@ -1048,9 +1050,36 @@ class GCPCFRTrainer:
                         percentage = (count / total_count) * 100
                         action_percentages[f"{action}_percent"] = round(percentage, 2)
                 
-                # Determine best action and confidence
-                best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
-                best_action_confidence = max(action_percentages.values())
+                # GROUP ACTIONS FOR RECOMMENDED ACTION CALCULATION
+                # This grouping logic ensures that the recommended action is based on
+                # the highest total probability across action types, not just the single
+                # highest action. This prevents recommending FOLD when combined raise
+                # probabilities (raise_small + raise_mid + raise_high) are higher.
+                #
+                # Action Groups:
+                # - FOLD: fold actions only
+                # - CALL: call_small + call_mid + call_high  
+                # - RAISE: raise_small + raise_mid + raise_high
+                
+                # Calculate group totals
+                fold_total = action_percentages.get('fold_percent', 0.0)
+                call_total = (action_percentages.get('call_small_percent', 0.0) + 
+                             action_percentages.get('call_mid_percent', 0.0) + 
+                             action_percentages.get('call_high_percent', 0.0))
+                raise_total = (action_percentages.get('raise_small_percent', 0.0) + 
+                              action_percentages.get('raise_mid_percent', 0.0) + 
+                              action_percentages.get('raise_high_percent', 0.0))
+                
+                # Determine recommended action based on highest group total
+                group_totals = {
+                    'FOLD': fold_total,
+                    'CALL': call_total, 
+                    'RAISE': raise_total
+                }
+                
+                # Find the group with the highest total probability
+                recommended_action = max(group_totals.items(), key=lambda x: x[1])[0]
+                recommended_confidence = max(group_totals.values())
                 
                 # Get training statistics
                 training_games = self.combined_scenario_counter.get(scenario_key, 0)
@@ -1064,8 +1093,8 @@ class GCPCFRTrainer:
                     'stack_depth': stack_category,
                     'blinds_level': blinds_level,
                     'training_games': training_games,
-                    'recommended_action': best_action.upper(),
-                    'confidence_percent': round(best_action_confidence, 2),
+                    'recommended_action': recommended_action,
+                    'confidence_percent': round(recommended_confidence, 2),
                     **action_percentages
                 }
                 
