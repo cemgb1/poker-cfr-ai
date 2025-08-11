@@ -209,3 +209,16 @@ __marimo__/
 # Test output files - should not be committed
 test_*.csv
 *_test_*.csv
+
+# Log files (keep logs directory structure but not content)
+logs/*.log
+
+# Checkpoint files (temporary training state)
+natural_cfr_checkpoint_*.pkl
+natural_cfr_emergency_*.pkl
+natural_cfr_error_*.pkl
+
+# Generated CSV files from demo runs
+demo_natural_scenarios.csv
+hero_demo_natural_strategies.csv
+villain_demo_natural_strategies.csv
