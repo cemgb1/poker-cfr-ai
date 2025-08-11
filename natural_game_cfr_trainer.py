@@ -51,7 +51,7 @@ import time
 import pickle
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class NaturalGameCFRTrainer(EnhancedCFRTrainer):
@@ -952,13 +952,24 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def save_training_state(self, filename):
         """
-        Save complete training state to file.
+        Save complete training state to file in checkpoints directory.
         
         Args:
-            filename: File to save to
+            filename: File to save to (will be placed in checkpoints/ directory)
         """
         try:
-            self.logger.info(f"Saving training state to {filename}...")
+            # Create checkpoints directory if it doesn't exist
+            checkpoints_dir = Path("checkpoints")
+            checkpoints_dir.mkdir(exist_ok=True)
+            
+            # Ensure filename goes into checkpoints directory
+            if not filename.startswith("checkpoints/"):
+                filepath = checkpoints_dir / filename
+            else:
+                filepath = Path(filename)
+            
+            self.logger.info(f"Saving training state to {filepath}...")
+            self.logger.info(f"Checkpoints directory: {checkpoints_dir.absolute()}")
             
             save_data = {
                 'hero_regret_sum': dict(self.regret_sum),
@@ -977,23 +988,25 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 'timestamp': datetime.now().isoformat()
             }
             
-            with open(filename, 'wb') as f:
+            with open(filepath, 'wb') as f:
                 pickle.dump(save_data, f)
             
-            self.logger.info(f"✅ Training state saved successfully to {filename}")
+            file_size_mb = filepath.stat().st_size / 1024 / 1024
+            self.logger.info(f"✅ Training state saved successfully to {filepath}")
             self.logger.info(f"   Games played: {self.natural_metrics['games_played']:,}")
             self.logger.info(f"   Unique scenarios: {self.natural_metrics['unique_scenarios']}")
-            self.logger.info(f"   File size: {Path(filename).stat().st_size / 1024 / 1024:.1f} MB")
+            self.logger.info(f"   File size: {file_size_mb:.1f} MB")
+            self.logger.info(f"   Checkpoint path: {filepath.absolute()}")
             
-            print(f"💾 Training state saved to {filename}")
+            print(f"💾 Training state saved to {filepath}")
             
             return True
             
         except Exception as e:
-            error_msg = f"Failed to save training state to {filename}: {e}"
+            error_msg = f"Failed to save training state to {filepath}: {e}"
             self.logger.error(error_msg)
             from logging_config import log_exception
-            log_exception(self.logger, f"Failed to save training state to {filename}")
+            log_exception(self.logger, f"Failed to save training state to {filepath}")
             print(f"❌ Failed to save training state: {e}")
             return False
     
@@ -1185,11 +1198,508 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             self.logger.error(error_msg)
             from logging_config import log_exception
             log_exception(self.logger, "Failed to export strategies")
-            print(f"❌ Failed to export strategies: {e}")
+    def create_performance_summary(self, training_duration=0.0, output_format='csv'):
+        """
+        Create a performance summary file with key training metrics.
+        
+        Args:
+            training_duration: Total training time in seconds
+            output_format: Output format ('csv' or 'json')
+            
+        Returns:
+            str: Path to created performance file
+        """
+        try:
+            # Create performance directory if it doesn't exist
+            performance_dir = Path("performance")
+            performance_dir.mkdir(exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Calculate key metrics
+            games_played = self.natural_metrics['games_played']
+            unique_scenarios = self.natural_metrics['unique_scenarios']
+            total_scenarios_recorded = len(self.natural_scenarios)
+            
+            if self.natural_scenarios:
+                hero_wins = sum(1 for s in self.natural_scenarios if s['hero_won'])
+                hero_win_rate = hero_wins / len(self.natural_scenarios)
+                villain_win_rate = 1.0 - hero_win_rate
+                
+                showdown_games = sum(1 for s in self.natural_scenarios if s['showdown'])
+                showdown_rate = showdown_games / len(self.natural_scenarios)
+                
+                three_bet_games = sum(1 for s in self.natural_scenarios if s['is_3bet'])
+                three_bet_rate = three_bet_games / len(self.natural_scenarios)
+                
+                avg_pot_size = sum(s['final_pot_bb'] for s in self.natural_scenarios) / len(self.natural_scenarios)
+                
+                # Calculate scenario coverage (out of theoretical max of 330)
+                theoretical_max_scenarios = 330
+                scenario_coverage = (unique_scenarios / theoretical_max_scenarios) * 100
+                
+                # Hand category distribution
+                hand_categories = {}
+                for scenario in self.natural_scenarios:
+                    cat = scenario['hand_category']
+                    hand_categories[cat] = hand_categories.get(cat, 0) + 1
+            else:
+                hero_win_rate = 0.0
+                villain_win_rate = 0.0
+                showdown_rate = 0.0
+                three_bet_rate = 0.0
+                avg_pot_size = 0.0
+                scenario_coverage = 0.0
+                hand_categories = {}
+            
+            # Calculate exploration statistics
+            total_state_actions = sum(len(actions) for actions in self.state_action_visits.values())
+            exploration_rate = self.epsilon_exploration
+            
+            # Games per minute
+            games_per_minute = (games_played / (training_duration / 60)) if training_duration > 0 else 0
+            
+            # Prepare performance data
+            performance_data = {
+                'timestamp': datetime.now().isoformat(),
+                'training_summary': {
+                    'games_played': games_played,
+                    'unique_scenarios_discovered': unique_scenarios,
+                    'total_scenarios_recorded': total_scenarios_recorded,
+                    'training_duration_seconds': training_duration,
+                    'training_duration_minutes': training_duration / 60,
+                    'games_per_minute': games_per_minute
+                },
+                'gameplay_metrics': {
+                    'hero_win_rate': hero_win_rate,
+                    'villain_win_rate': villain_win_rate,
+                    'showdown_rate': showdown_rate,
+                    'three_bet_rate': three_bet_rate,
+                    'average_pot_size_bb': avg_pot_size
+                },
+                'coverage_metrics': {
+                    'scenario_coverage_percentage': scenario_coverage,
+                    'theoretical_max_scenarios': theoretical_max_scenarios,
+                    'hand_categories_discovered': len(hand_categories),
+                    'theoretical_max_hand_categories': 11
+                },
+                'exploration_metrics': {
+                    'epsilon_exploration_rate': exploration_rate,
+                    'min_visit_threshold': self.min_visit_threshold,
+                    'total_state_action_pairs': total_state_actions
+                },
+                'strategy_metrics': {
+                    'hero_strategy_scenarios': len(self.strategy_sum),
+                    'villain_strategy_scenarios': len(self.villain_strategy_sum)
+                },
+                'hand_category_distribution': hand_categories,
+                'training_parameters': {
+                    'epsilon_exploration': self.epsilon_exploration,
+                    'min_visit_threshold': self.min_visit_threshold,
+                    'tournament_survival_penalty': self.tournament_survival_penalty,
+                    'enable_pruning': getattr(self, 'enable_pruning', True),
+                    'regret_pruning_threshold': getattr(self, 'regret_pruning_threshold', -300.0),
+                    'strategy_pruning_threshold': getattr(self, 'strategy_pruning_threshold', 0.001)
+                }
+            }
+            
+            # Save file based on format
+            if output_format.lower() == 'json':
+                filename = f"natural_cfr_performance_{timestamp}.json"
+                filepath = performance_dir / filename
+                
+                with open(filepath, 'w') as f:
+                    json.dump(performance_data, f, indent=2, default=str)
+                
+                self.logger.info(f"✅ Performance summary saved as JSON to {filepath}")
+            
+            else:  # CSV format
+                filename = f"natural_cfr_performance_{timestamp}.csv"
+                filepath = performance_dir / filename
+                
+                # Flatten data for CSV
+                csv_data = []
+                
+                # Add summary metrics
+                csv_data.append(['Metric', 'Value', 'Category'])
+                csv_data.append(['Games Played', games_played, 'Training Summary'])
+                csv_data.append(['Unique Scenarios Discovered', unique_scenarios, 'Training Summary'])
+                csv_data.append(['Total Scenarios Recorded', total_scenarios_recorded, 'Training Summary'])
+                csv_data.append(['Training Duration (minutes)', f"{training_duration/60:.1f}", 'Training Summary'])
+                csv_data.append(['Games Per Minute', f"{games_per_minute:.1f}", 'Training Summary'])
+                
+                csv_data.append(['Hero Win Rate', f"{hero_win_rate:.3f}", 'Gameplay Metrics'])
+                csv_data.append(['Villain Win Rate', f"{villain_win_rate:.3f}", 'Gameplay Metrics'])
+                csv_data.append(['Showdown Rate', f"{showdown_rate:.3f}", 'Gameplay Metrics'])
+                csv_data.append(['3-bet Rate', f"{three_bet_rate:.3f}", 'Gameplay Metrics'])
+                csv_data.append(['Average Pot Size (BB)', f"{avg_pot_size:.2f}", 'Gameplay Metrics'])
+                
+                csv_data.append(['Scenario Coverage (%)', f"{scenario_coverage:.1f}", 'Coverage Metrics'])
+                csv_data.append(['Hand Categories Discovered', len(hand_categories), 'Coverage Metrics'])
+                
+                csv_data.append(['Epsilon Exploration Rate', exploration_rate, 'Exploration Metrics'])
+                csv_data.append(['Min Visit Threshold', self.min_visit_threshold, 'Exploration Metrics'])
+                csv_data.append(['Total State-Action Pairs', total_state_actions, 'Exploration Metrics'])
+                
+                csv_data.append(['Hero Strategy Scenarios', len(self.strategy_sum), 'Strategy Metrics'])
+                csv_data.append(['Villain Strategy Scenarios', len(self.villain_strategy_sum), 'Strategy Metrics'])
+                
+                # Add hand category distribution
+                for category, count in hand_categories.items():
+                    csv_data.append([f"Hand Category: {category}", count, 'Hand Distribution'])
+                
+                # Write CSV
+                import csv
+                with open(filepath, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerows(csv_data)
+                
+                self.logger.info(f"✅ Performance summary saved as CSV to {filepath}")
+            
+            # Log summary to console and logger
+            self.logger.info("PERFORMANCE SUMMARY CREATED:")
+            self.logger.info(f"  File path: {filepath.absolute()}")
+            self.logger.info(f"  Games played: {games_played:,}")
+            self.logger.info(f"  Training duration: {training_duration/60:.1f} minutes")
+            self.logger.info(f"  Unique scenarios: {unique_scenarios}")
+            self.logger.info(f"  Scenario coverage: {scenario_coverage:.1f}%")
+            self.logger.info(f"  Hero win rate: {hero_win_rate:.3f}")
+            self.logger.info(f"  Showdown rate: {showdown_rate:.3f}")
+            self.logger.info(f"  3-bet rate: {three_bet_rate:.3f}")
+            
+            print(f"📊 Performance summary saved to {filepath}")
+            print(f"   📈 {games_played:,} games, {unique_scenarios} scenarios, {scenario_coverage:.1f}% coverage")
+            
+            return str(filepath)
+            
+        except Exception as e:
+            error_msg = f"Failed to create performance summary: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, "Failed to create performance summary")
+            print(f"❌ Failed to create performance summary: {e}")
+            return None
+    
+    def create_final_lookup_table(self, filename=None):
+        """
+        Create a final lookup table CSV with all discovered scenarios, attributes, 
+        final estimated EV, recommended action, and confidence.
+        
+        Args:
+            filename: Output filename (optional, will auto-generate if None)
+            
+        Returns:
+            str: Path to created lookup table file
+        """
+        try:
+            if filename is None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"natural_cfr_final_lookup_table_{timestamp}.csv"
+            
+            self.logger.info(f"Creating final lookup table: {filename}...")
+            
+            lookup_data = []
+            
+            # Process hero strategies
+            for scenario_key, strategy_counts in self.strategy_sum.items():
+                if sum(strategy_counts.values()) > 0:
+                    parts = scenario_key.split("|")
+                    if len(parts) >= 4:
+                        hand_category, position, stack_category, blinds_level = parts[:4]
+                    else:
+                        continue
+                    
+                    # Calculate normalized probabilities
+                    total_count = sum(strategy_counts.values())
+                    action_probs = {}
+                    for action_name in ACTIONS.keys():
+                        action_probs[action_name] = strategy_counts.get(action_name, 0.0) / total_count
+                    
+                    # Find best action and confidence
+                    best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
+                    confidence = max(strategy_counts.values()) / total_count
+                    
+                    # Estimate EV from natural scenarios
+                    scenario_payoffs = [s['hero_payoff'] for s in self.natural_scenarios 
+                                      if s.get('scenario_key') == scenario_key]
+                    if scenario_payoffs:
+                        estimated_ev = sum(scenario_payoffs) / len(scenario_payoffs)
+                        ev_std = np.std(scenario_payoffs) if len(scenario_payoffs) > 1 else 0.0
+                    else:
+                        estimated_ev = 0.0
+                        ev_std = 0.0
+                    
+                    # Count training games for this scenario
+                    training_games = self.natural_scenario_counter.get(scenario_key, 0)
+                    
+                    # Get visit counts for state-action pairs
+                    state_action_visits = dict(self.state_action_visits.get(scenario_key, {}))
+                    total_visits = sum(state_action_visits.values())
+                    
+                    # Calculate action percentages
+                    action_percentages = {}
+                    for action_name in ACTIONS.keys():
+                        action_percentages[f"{action_name}_pct"] = round(action_probs[action_name] * 100, 1)
+                    
+                    row = {
+                        'scenario_key': scenario_key,
+                        'hand_category': hand_category,
+                        'position': position,
+                        'stack_depth': stack_category,
+                        'blinds_level': blinds_level,
+                        'training_games': training_games,
+                        'total_visits': total_visits,
+                        'estimated_ev': round(estimated_ev, 3),
+                        'ev_std_dev': round(ev_std, 3),
+                        'best_action': best_action.upper(),
+                        'confidence': round(confidence, 3),
+                        'player': 'HERO',
+                        **action_percentages
+                    }
+                    lookup_data.append(row)
+            
+            # Process villain strategies
+            for scenario_key, strategy_counts in self.villain_strategy_sum.items():
+                if sum(strategy_counts.values()) > 0:
+                    parts = scenario_key.split("|")
+                    if len(parts) >= 4:
+                        hand_category, position, stack_category, blinds_level = parts[:4]
+                    else:
+                        continue
+                    
+                    # Calculate normalized probabilities
+                    total_count = sum(strategy_counts.values())
+                    action_probs = {}
+                    for action_name in ACTIONS.keys():
+                        action_probs[action_name] = strategy_counts.get(action_name, 0.0) / total_count
+                    
+                    # Find best action and confidence
+                    best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
+                    confidence = max(strategy_counts.values()) / total_count
+                    
+                    # Estimate EV from natural scenarios (villain perspective)
+                    scenario_payoffs = [s['villain_payoff'] if 'villain_payoff' in s else -s['hero_payoff'] 
+                                      for s in self.natural_scenarios 
+                                      if s.get('scenario_key') == scenario_key]
+                    if scenario_payoffs:
+                        estimated_ev = sum(scenario_payoffs) / len(scenario_payoffs)
+                        ev_std = np.std(scenario_payoffs) if len(scenario_payoffs) > 1 else 0.0
+                    else:
+                        estimated_ev = 0.0
+                        ev_std = 0.0
+                    
+                    # Count training games for this scenario
+                    training_games = self.natural_scenario_counter.get(scenario_key, 0)
+                    
+                    # Get visit counts for state-action pairs
+                    state_action_visits = dict(self.state_action_visits.get(scenario_key, {}))
+                    total_visits = sum(state_action_visits.values())
+                    
+                    # Calculate action percentages
+                    action_percentages = {}
+                    for action_name in ACTIONS.keys():
+                        action_percentages[f"{action_name}_pct"] = round(action_probs[action_name] * 100, 1)
+                    
+                    row = {
+                        'scenario_key': scenario_key,
+                        'hand_category': hand_category,
+                        'position': position,
+                        'stack_depth': stack_category,
+                        'blinds_level': blinds_level,
+                        'training_games': training_games,
+                        'total_visits': total_visits,
+                        'estimated_ev': round(estimated_ev, 3),
+                        'ev_std_dev': round(ev_std, 3),
+                        'best_action': best_action.upper(),
+                        'confidence': round(confidence, 3),
+                        'player': 'VILLAIN',
+                        **action_percentages
+                    }
+                    lookup_data.append(row)
+            
+            if lookup_data:
+                # Sort by confidence and training games
+                lookup_data.sort(key=lambda x: (x['confidence'], x['training_games']), reverse=True)
+                
+                # Create DataFrame and save
+                df = pd.DataFrame(lookup_data)
+                df.to_csv(filename, index=False)
+                
+                file_size_kb = Path(filename).stat().st_size / 1024
+                self.logger.info(f"✅ Final lookup table saved to {filename}")
+                self.logger.info(f"   Entries: {len(lookup_data)} scenario strategies")
+                self.logger.info(f"   Hero strategies: {len([r for r in lookup_data if r['player'] == 'HERO'])}")
+                self.logger.info(f"   Villain strategies: {len([r for r in lookup_data if r['player'] == 'VILLAIN'])}")
+                self.logger.info(f"   File size: {file_size_kb:.1f} KB")
+                self.logger.info(f"   File path: {Path(filename).absolute()}")
+                
+                print(f"📊 Final lookup table saved to {filename}")
+                print(f"   📈 {len(lookup_data)} scenario strategies")
+                
+                # Show top strategies
+                print(f"\n🎯 Top Confident Strategies:")
+                for i, row in enumerate(lookup_data[:5]):
+                    print(f"   {i+1}. {row['player']} {row['scenario_key']}: {row['best_action']} ({row['confidence']:.1%})")
+                
+                return filename
+                
+            else:
+                self.logger.warning("No strategy data available for lookup table")
+                print("❌ No strategy data available for lookup table")
+                return None
+                
+        except Exception as e:
+            error_msg = f"Failed to create final lookup table: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, "Failed to create final lookup table")
+            print(f"❌ Failed to create lookup table: {e}")
+            return None
+    
+    def archive_old_files(self):
+        """
+        Archive old files and folders that are no longer used by the new simulation model.
+        Moves them to 'archivedfileslocation' folder.
+        
+        Returns:
+            list: List of archived files/folders
+        """
+        try:
+            # Create archive directory if it doesn't exist
+            archive_dir = Path("archivedfileslocation")
+            archive_dir.mkdir(exist_ok=True)
+            
+            self.logger.info(f"Archiving old files to {archive_dir.absolute()}...")
+            
+            archived_items = []
+            
+            # Define patterns and specific files to archive
+            # These are files from the old fixed-scenario system or no longer used files
+            archive_patterns = [
+                # Old scenario files (not natural_*)
+                "demo_scenarios*.csv",
+                "test_scenarios*.csv",
+                "scenarios_*.csv",
+                # Old strategy files (not natural_*)
+                "demo_strategies*.csv", 
+                "test_strategies*.csv",
+                "strategies_*.csv",
+                # Old checkpoint files (not natural_cfr_*)
+                "cfr_checkpoint*.pkl",
+                "checkpoint*.pkl",
+                # Old performance files
+                "performance*.csv",
+                "metrics*.csv",
+                # GCP/Cloud specific files (if not being used)
+                "gcp_*.csv",
+                "cloud_*.csv",
+                # Legacy training files
+                "enhanced_cfr_preflop_generator.py",  # v1 files (if v2 exists)
+                "enhanced_cfr_trainer.py",  # v1 files (if v2 exists)
+                # Old analysis files (not from current run)
+                "analysis_scenarios_*.csv",
+                "analysis_strategies_*.csv"
+            ]
+            
+            # Also check for specific folders to archive
+            archive_folders = [
+                "archivefolder",  # Existing archive folder can be moved
+                "archiveworks",   # Existing archive folder can be moved
+                "old_checkpoints",
+                "legacy_files",
+                "deprecated"
+            ]
+            
+            current_dir = Path(".")
+            
+            # Archive matching files
+            for pattern in archive_patterns:
+                for file_path in current_dir.glob(pattern):
+                    if file_path.is_file():
+                        try:
+                            # Check if it's a recent natural CFR file - don't archive those
+                            if ("natural_" in file_path.name and 
+                                any(recent in file_path.name for recent in [
+                                    datetime.now().strftime("%Y%m%d"),
+                                    (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                                ])):
+                                continue
+                            
+                            dest_path = archive_dir / file_path.name
+                            if not dest_path.exists():
+                                file_path.rename(dest_path)
+                                archived_items.append(str(file_path))
+                                self.logger.info(f"   📦 Archived file: {file_path} -> {dest_path}")
+                        except Exception as e:
+                            self.logger.warning(f"Could not archive {file_path}: {e}")
+            
+            # Archive matching folders
+            for folder_name in archive_folders:
+                folder_path = current_dir / folder_name
+                if folder_path.exists() and folder_path.is_dir():
+                    try:
+                        dest_path = archive_dir / folder_name
+                        if not dest_path.exists():
+                            folder_path.rename(dest_path)
+                            archived_items.append(str(folder_path))
+                            self.logger.info(f"   📦 Archived folder: {folder_path} -> {dest_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Could not archive folder {folder_path}: {e}")
+            
+            # Archive specific old files if they exist
+            specific_old_files = [
+                "cfr_lookup_table.csv",
+                "cfr_performance.csv", 
+                "preflop_cfr.py",
+                "old_trainer.py",
+                "legacy_scenarios.csv"
+            ]
+            
+            for old_file in specific_old_files:
+                old_path = current_dir / old_file
+                if old_path.exists():
+                    try:
+                        dest_path = archive_dir / old_file
+                        if not dest_path.exists():
+                            old_path.rename(dest_path)
+                            archived_items.append(str(old_path))
+                            self.logger.info(f"   📦 Archived legacy file: {old_path} -> {dest_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Could not archive {old_path}: {e}")
+            
+            if archived_items:
+                self.logger.info(f"✅ Archiving completed successfully")
+                self.logger.info(f"   Archive location: {archive_dir.absolute()}")
+                self.logger.info(f"   Items archived: {len(archived_items)}")
+                for item in archived_items:
+                    self.logger.info(f"     - {item}")
+                
+                print(f"📦 Archived {len(archived_items)} old files/folders to {archive_dir}")
+                print(f"   📁 Archive location: {archive_dir.absolute()}")
+                
+                if len(archived_items) <= 10:  # Show all if not too many
+                    for item in archived_items:
+                        print(f"     - {Path(item).name}")
+                else:
+                    for item in archived_items[:5]:
+                        print(f"     - {Path(item).name}")
+                    print(f"     ... and {len(archived_items) - 5} more items")
+            else:
+                self.logger.info("No old files found to archive")
+                print("📦 No old files found to archive")
+            
+            return archived_items
+            
+        except Exception as e:
+            error_msg = f"Failed to archive old files: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, "Failed to archive old files")
+            print(f"❌ Failed to archive old files: {e}")
+            return []
 
 
 if __name__ == "__main__":
-    print("Natural Game CFR Trainer - Ready for training!")
     
     # Example usage
     def demo_natural_training(n_games=1000):

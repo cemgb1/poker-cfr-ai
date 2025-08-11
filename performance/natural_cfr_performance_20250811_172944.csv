@@ -1,0 +1,19 @@
+Metric,Value,Category
+Games Played,50,Training Summary
+Unique Scenarios Discovered,19,Training Summary
+Total Scenarios Recorded,50,Training Summary
+Training Duration (minutes),0.0,Training Summary
+Games Per Minute,0.0,Training Summary
+Hero Win Rate,0.500,Gameplay Metrics
+Villain Win Rate,0.500,Gameplay Metrics
+Showdown Rate,0.620,Gameplay Metrics
+3-bet Rate,0.300,Gameplay Metrics
+Average Pot Size (BB),37.37,Gameplay Metrics
+Scenario Coverage (%),5.8,Coverage Metrics
+Hand Categories Discovered,1,Coverage Metrics
+Epsilon Exploration Rate,0.2,Exploration Metrics
+Min Visit Threshold,3,Exploration Metrics
+Total State-Action Pairs,68,Exploration Metrics
+Hero Strategy Scenarios,15,Strategy Metrics
+Villain Strategy Scenarios,13,Strategy Metrics
+Hand Category: trash,50,Hand Distribution

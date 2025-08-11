@@ -142,16 +142,40 @@ def run_natural_cfr_training(args):
         logger.info(f"Exported natural scenarios to: {scenarios_file}")
         logger.info(f"Exported strategies to: hero_{strategies_file} and villain_{strategies_file}")
         
-        # Save final checkpoint
+        # Save final checkpoint (to checkpoints directory)
         final_checkpoint = f"natural_cfr_final_{timestamp}.pkl"
         trainer.save_training_state(final_checkpoint)
-        logger.info(f"Saved final checkpoint: {final_checkpoint}")
+        logger.info(f"Saved final checkpoint: checkpoints/{final_checkpoint}")
+        
+        # Create performance summary
+        logger.info("Creating performance summary...")
+        performance_file = trainer.create_performance_summary(training_duration, output_format='csv')
+        if performance_file:
+            logger.info(f"Performance summary created: {performance_file}")
+        
+        # Create final lookup table
+        logger.info("Creating final lookup table...")
+        lookup_table_file = trainer.create_final_lookup_table()
+        if lookup_table_file:
+            logger.info(f"Final lookup table created: {lookup_table_file}")
+        
+        # Archive old files
+        logger.info("Archiving old files...")
+        archived_items = trainer.archive_old_files()
+        if archived_items:
+            logger.info(f"Archived {len(archived_items)} old files/folders")
         
         print(f"\n📁 Results saved:")
         print(f"   📊 Scenarios: {scenarios_file}")
         print(f"   🎯 Hero strategies: hero_{strategies_file}")
         print(f"   🎯 Villain strategies: villain_{strategies_file}")
-        print(f"   💾 Final checkpoint: {final_checkpoint}")
+        print(f"   💾 Final checkpoint: checkpoints/{final_checkpoint}")
+        if performance_file:
+            print(f"   📈 Performance summary: {performance_file}")
+        if lookup_table_file:
+            print(f"   📋 Final lookup table: {lookup_table_file}")
+        if archived_items:
+            print(f"   📦 Archived items: {len(archived_items)} files/folders to archivedfileslocation/")
         
         # Show training summary
         logger.info("TRAINING SUMMARY:")
@@ -269,6 +293,13 @@ def run_demo_mode(args):
     logger.info("Exporting demo results...")
     demo_trainer.export_natural_scenarios_csv("demo_natural_scenarios.csv")
     demo_trainer.export_strategies_csv("demo_natural_strategies.csv")
+    
+    # Create demo performance summary
+    demo_performance_file = demo_trainer.create_performance_summary(training_duration=0.0, output_format='csv')
+    
+    # Create demo lookup table
+    demo_lookup_file = demo_trainer.create_final_lookup_table("demo_final_lookup_table.csv")
+    
     logger.info("Demo results exported successfully")
     
     logger.info("DEMO RESULTS:")
@@ -282,6 +313,10 @@ def run_demo_mode(args):
     print(f"      📊 demo_natural_scenarios.csv")
     print(f"      🎯 hero_demo_natural_strategies.csv")
     print(f"      🎯 villain_demo_natural_strategies.csv")
+    if demo_performance_file:
+        print(f"      📈 {demo_performance_file}")
+    if demo_lookup_file:
+        print(f"      📋 {demo_lookup_file}")
     
     # Show some interesting statistics
     if demo_trainer.natural_scenarios:
@@ -390,15 +425,29 @@ def run_analysis_mode(args):
     trainer.export_natural_scenarios_csv(scenarios_file)
     trainer.export_strategies_csv(strategies_file)
     
+    # Create analysis performance summary
+    analysis_performance_file = trainer.create_performance_summary(training_duration=0.0, output_format='csv')
+    
+    # Create analysis lookup table
+    analysis_lookup_file = trainer.create_final_lookup_table(f"analysis_final_lookup_table_{timestamp}.csv")
+    
     logger.info(f"Analysis exported to:")
     logger.info(f"  Scenarios: {scenarios_file}")
     logger.info(f"  Hero strategies: hero_{strategies_file}")
     logger.info(f"  Villain strategies: villain_{strategies_file}")
+    if analysis_performance_file:
+        logger.info(f"  Performance summary: {analysis_performance_file}")
+    if analysis_lookup_file:
+        logger.info(f"  Lookup table: {analysis_lookup_file}")
     
     print(f"\n📁 Analysis exported to:")
     print(f"   📊 {scenarios_file}")
     print(f"   🎯 hero_{strategies_file}")
     print(f"   🎯 villain_{strategies_file}")
+    if analysis_performance_file:
+        print(f"   📈 {analysis_performance_file}")
+    if analysis_lookup_file:
+        print(f"   📋 {analysis_lookup_file}")
     
     flush_logs(logger)
     return trainer
