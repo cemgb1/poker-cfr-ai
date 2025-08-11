@@ -345,8 +345,41 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             # Get villain strategy
             strategy = self.get_villain_strategy(scenario_key, available_actions)
         
-        # Sample action from strategy
-        return self.sample_action(strategy, available_actions)
+        # Sample action from strategy (using safe sampling)
+        return self.safe_sample_action(strategy, available_actions)
+    
+    def safe_sample_action(self, strategy, available_actions):
+        """
+        Safely sample action from strategy probabilities, handling action mismatches.
+        
+        Args:
+            strategy: Strategy probabilities dictionary
+            available_actions: List of currently available actions
+            
+        Returns:
+            str: Chosen action from available actions
+        """
+        # Only consider actions that are both in strategy AND available
+        valid_actions = [action for action in available_actions if action in strategy]
+        
+        if not valid_actions:
+            # If no valid actions in strategy, use uniform over available actions
+            return random.choice(available_actions)
+        
+        # Get probabilities for valid actions only
+        probs = [strategy.get(action, 0.0) for action in valid_actions]
+        
+        # Normalize probabilities to ensure they sum to 1
+        prob_sum = sum(probs)
+        if prob_sum == 0:
+            # All probabilities are 0, use uniform distribution over valid actions
+            probs = [1.0 / len(valid_actions)] * len(valid_actions)
+        else:
+            # Normalize to sum to 1
+            probs = [p / prob_sum for p in probs]
+        
+        chosen_idx = np.random.choice(len(valid_actions), p=probs)
+        return valid_actions[chosen_idx]
     
     def get_villain_strategy(self, scenario_key, available_actions):
         """
@@ -682,7 +715,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 hero_action = action_info['action']
                 break
         
-        if hero_action:
+        if hero_action and hero_action in hero_available_actions:
             # Get hero strategy and update regrets
             hero_strategy = self.get_strategy(hero_scenario_key, hero_available_actions)
             self.update_enhanced_regrets(
@@ -707,7 +740,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 villain_action = action_info['action']
                 break
         
-        if villain_action:
+        if villain_action and villain_action in villain_available_actions:
             # Get villain strategy and update regrets
             villain_strategy = self.get_villain_strategy(villain_scenario_key, villain_available_actions)
             self.update_villain_regrets(
@@ -721,10 +754,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             for action in villain_available_actions:
                 self.villain_strategy_sum[villain_scenario_key][action] += villain_strategy.get(action, 0.0)
         
-        # Update visit counts for exploration
-        if hero_action:
+        # Update visit counts for exploration (only for valid actions)
+        if hero_action and hero_action in hero_available_actions:
             self.state_action_visits[hero_scenario_key][hero_action] += 1
-        if villain_action:
+        if villain_action and villain_action in villain_available_actions:
             self.state_action_visits[villain_scenario_key][villain_action] += 1
     
     def update_villain_regrets(self, scenario_key, action_taken, strategy, 
