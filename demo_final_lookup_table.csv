@@ -1,0 +1,13 @@
+scenario_key,hand_category,position,stack_depth,blinds_level,training_games,total_visits,estimated_ev,ev_std_dev,best_action,confidence,player,fold_pct,call_small_pct,call_mid_pct,call_high_pct,raise_small_pct,raise_mid_pct,raise_high_pct
+trash|BTN|very_deep|high,trash,BTN,very_deep,high,3,3,2.875,5.127,RAISE_HIGH,0.503,HERO,6.7,6.7,0.9,0.4,6.7,28.5,50.3
+trash|BTN|very_deep|low,trash,BTN,very_deep,low,2,3,-5.85,9.6,FOLD,0.455,HERO,45.5,7.1,14.9,11.0,7.1,7.1,7.1
+trash|BB|short|low,trash,BB,short,low,0,1,0.0,0.0,FOLD,0.333,VILLAIN,33.3,33.3,0.0,0.0,33.3,0.0,0.0
+trash|BTN|medium|high,trash,BTN,medium,high,1,2,13.405,0.0,FOLD,0.25,VILLAIN,25.0,25.0,0.0,0.0,25.0,25.0,0.0
+trash|BB|deep|high,trash,BB,deep,high,1,1,-16.025,0.0,FOLD,0.2,HERO,20.0,20.0,0.0,0.0,20.0,20.0,20.0
+trash|BTN|medium|high,trash,BTN,medium,high,1,2,-13.405,0.0,FOLD,0.2,HERO,20.0,20.0,0.0,0.0,20.0,20.0,20.0
+trash|BB|very_deep|high,trash,BB,very_deep,high,0,1,0.0,0.0,FOLD,0.2,VILLAIN,20.0,20.0,0.0,0.0,20.0,20.0,20.0
+trash|BTN|very_deep|low,trash,BTN,very_deep,low,2,3,5.85,9.6,FOLD,0.143,VILLAIN,14.3,14.3,14.3,14.3,14.3,14.3,14.3
+trash|BB|medium|low,trash,BB,medium,low,1,1,10.5,0.0,FOLD,0.143,HERO,14.3,14.3,14.3,14.3,14.3,14.3,14.3
+trash|BB|very_deep|low,trash,BB,very_deep,low,1,1,-3.75,0.0,FOLD,0.143,HERO,14.3,14.3,14.3,14.3,14.3,14.3,14.3
+trash|BB|deep|low,trash,BB,deep,low,0,1,0.0,0.0,FOLD,0.143,VILLAIN,14.3,14.3,14.3,14.3,14.3,14.3,14.3
+trash|BTN|very_deep|medium,trash,BTN,very_deep,medium,0,1,0.0,0.0,FOLD,0.143,VILLAIN,14.3,14.3,14.3,14.3,14.3,14.3,14.3
