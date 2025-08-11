@@ -1,8 +1,5 @@
 scenario_key,hand_category,position,stack_depth,blinds_level,training_games,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
-trash|BB|very_deep|low,trash,BB,very_deep,low,0,FOLD,0.484,0.484,0.216,0.0,0.0,0.1,0.1,0.1
-trash|BTN|very_deep|low,trash,BTN,very_deep,low,3,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
-trash|BB|medium|low,trash,BB,medium,low,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
+trash|BTN|very_deep|medium,trash,BTN,very_deep,medium,0,RAISE_HIGH,0.357,0.071,0.071,0.071,0.071,0.143,0.214,0.357
+trash|BTN|deep|medium,trash,BTN,deep,medium,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
 trash|BTN|deep|high,trash,BTN,deep,high,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
-trash|BB|deep|medium,trash,BB,deep,medium,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
-trash|BB|medium|medium,trash,BB,medium,medium,0,FOLD,0.2,0.2,0.2,0.2,0.0,0.2,0.2,0.0
-trash|BTN|very_deep|high,trash,BTN,very_deep,high,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
+trash|BB|very_deep|low,trash,BB,very_deep,low,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143

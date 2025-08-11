@@ -27,6 +27,7 @@ from pathlib import Path
 from datetime import datetime
 
 from natural_game_cfr_trainer import NaturalGameCFRTrainer
+from logging_config import setup_logging, log_exception, flush_logs
 
 
 def run_natural_cfr_training(args):
@@ -39,6 +40,28 @@ def run_natural_cfr_training(args):
     Returns:
         NaturalGameCFRTrainer: Trained model
     """
+    # Set up logging
+    logger = setup_logging("natural_cfr_training")
+    
+    logger.info("🚀 Natural Game CFR Training System")
+    logger.info("=" * 60)
+    logger.info(f"Training mode: {args.mode}")
+    logger.info(f"Games to simulate: {args.games:,}")
+    logger.info(f"Epsilon exploration: {args.epsilon}")
+    logger.info(f"Min visit threshold: {args.min_visits}")
+    logger.info(f"Tournament penalty: {args.tournament_penalty}")
+    logger.info(f"Save interval: every {args.save_interval} games")
+    logger.info(f"Log interval: every {args.log_interval} games")
+    
+    # Log initialization parameters
+    logger.info("Model Initialization Parameters:")
+    logger.info(f"  - enable_pruning: {args.enable_pruning}")
+    logger.info(f"  - regret_pruning_threshold: {args.regret_threshold}")
+    logger.info(f"  - strategy_pruning_threshold: {args.strategy_threshold}")
+    logger.info(f"  - tournament_survival_penalty: {args.tournament_penalty}")
+    logger.info(f"  - epsilon_exploration: {args.epsilon}")
+    logger.info(f"  - min_visit_threshold: {args.min_visits}")
+    
     print("🚀 Natural Game CFR Training System")
     print("=" * 60)
     print(f"🎲 Training mode: {args.mode}")
@@ -50,26 +73,38 @@ def run_natural_cfr_training(args):
     print(f"📝 Log interval: every {args.log_interval} games")
     
     # Initialize trainer
+    logger.info("Initializing NaturalGameCFRTrainer...")
     trainer = NaturalGameCFRTrainer(
         enable_pruning=args.enable_pruning,
         regret_pruning_threshold=args.regret_threshold,
         strategy_pruning_threshold=args.strategy_threshold,
         tournament_survival_penalty=args.tournament_penalty,
         epsilon_exploration=args.epsilon,
-        min_visit_threshold=args.min_visits
+        min_visit_threshold=args.min_visits,
+        logger=logger
     )
+    logger.info("Trainer initialized successfully")
     
     # Load checkpoint if specified
     if args.resume:
+        logger.info(f"Attempting to resume training from checkpoint: {args.resume}")
         if Path(args.resume).exists():
             if trainer.load_training_state(args.resume):
-                print(f"✅ Resumed training from {args.resume}")
+                success_msg = f"✅ Resumed training from {args.resume}"
+                logger.info(f"Successfully resumed training from {args.resume}")
+                print(success_msg)
             else:
-                print(f"❌ Failed to load {args.resume}, starting fresh")
+                error_msg = f"❌ Failed to load {args.resume}, starting fresh"
+                logger.warning(f"Failed to load checkpoint {args.resume}, starting fresh training")
+                print(error_msg)
         else:
-            print(f"❌ Checkpoint file {args.resume} not found, starting fresh")
+            error_msg = f"❌ Checkpoint file {args.resume} not found, starting fresh"
+            logger.warning(f"Checkpoint file {args.resume} not found, starting fresh training")
+            print(error_msg)
     
     # Run training
+    training_msg = f"Starting natural game simulation with {args.games} games..."
+    logger.info(training_msg)
     print(f"\n🎯 Starting natural game simulation...")
     training_start = time.time()
     
@@ -83,6 +118,10 @@ def run_natural_cfr_training(args):
         training_end = time.time()
         training_duration = training_end - training_start
         
+        success_msg = f"Training completed successfully in {training_duration/60:.1f} minutes"
+        logger.info(success_msg)
+        logger.info(f"Games per minute: {results['games_played'] / (training_duration/60):.1f}")
+        
         print(f"\n🎉 Training completed successfully!")
         print(f"⏱️  Training time: {training_duration/60:.1f} minutes")
         print(f"🎲 Games per minute: {results['games_played'] / (training_duration/60):.1f}")
@@ -90,21 +129,37 @@ def run_natural_cfr_training(args):
         # Export results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        export_msg = f"Exporting results with timestamp {timestamp}..."
+        logger.info(export_msg)
         print(f"\n📊 Exporting results...")
-        trainer.export_natural_scenarios_csv(f"natural_scenarios_{timestamp}.csv")
-        trainer.export_strategies_csv(f"natural_strategies_{timestamp}.csv")
+        
+        scenarios_file = f"natural_scenarios_{timestamp}.csv"
+        strategies_file = f"natural_strategies_{timestamp}.csv"
+        
+        trainer.export_natural_scenarios_csv(scenarios_file)
+        trainer.export_strategies_csv(strategies_file)
+        
+        logger.info(f"Exported natural scenarios to: {scenarios_file}")
+        logger.info(f"Exported strategies to: hero_{strategies_file} and villain_{strategies_file}")
         
         # Save final checkpoint
         final_checkpoint = f"natural_cfr_final_{timestamp}.pkl"
         trainer.save_training_state(final_checkpoint)
+        logger.info(f"Saved final checkpoint: {final_checkpoint}")
         
         print(f"\n📁 Results saved:")
-        print(f"   📊 Scenarios: natural_scenarios_{timestamp}.csv")
-        print(f"   🎯 Hero strategies: hero_natural_strategies_{timestamp}.csv")
-        print(f"   🎯 Villain strategies: villain_natural_strategies_{timestamp}.csv")
+        print(f"   📊 Scenarios: {scenarios_file}")
+        print(f"   🎯 Hero strategies: hero_{strategies_file}")
+        print(f"   🎯 Villain strategies: villain_{strategies_file}")
         print(f"   💾 Final checkpoint: {final_checkpoint}")
         
         # Show training summary
+        logger.info("TRAINING SUMMARY:")
+        logger.info(f"  Total games played: {results['games_played']:,}")
+        logger.info(f"  Unique scenarios discovered: {results['unique_scenarios']}")
+        logger.info(f"  Hero strategy scenarios: {results['hero_strategy_scenarios']}")
+        logger.info(f"  Villain strategy scenarios: {results['villain_strategy_scenarios']}")
+        
         print(f"\n📈 TRAINING SUMMARY:")
         print(f"   🎲 Total games played: {results['games_played']:,}")
         print(f"   📊 Unique scenarios discovered: {results['unique_scenarios']}")
@@ -114,21 +169,31 @@ def run_natural_cfr_training(args):
         # Calculate coverage
         if results['unique_scenarios'] > 0:
             coverage_rate = (results['unique_scenarios'] / 330) * 100  # 330 is theoretical max
+            logger.info(f"Scenario space coverage: {coverage_rate:.1f}%")
             print(f"   📈 Scenario space coverage: {coverage_rate:.1f}%")
         
+        flush_logs(logger)
         return trainer
         
     except KeyboardInterrupt:
+        interrupt_msg = "Training interrupted by user"
+        logger.warning(interrupt_msg)
         print(f"\n🛑 Training interrupted by user")
         
         # Save emergency checkpoint
         emergency_checkpoint = f"natural_cfr_emergency_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
         trainer.save_training_state(emergency_checkpoint)
+        checkpoint_msg = f"Emergency checkpoint saved: {emergency_checkpoint}"
+        logger.info(checkpoint_msg)
         print(f"💾 Emergency checkpoint saved: {emergency_checkpoint}")
         
+        flush_logs(logger)
         return trainer
         
     except Exception as e:
+        error_msg = f"Training failed with error: {e}"
+        logger.error(error_msg)
+        log_exception(logger, "Training failed")
         print(f"\n❌ Training failed with error: {e}")
         import traceback
         print(f"🔍 Traceback:\n{traceback.format_exc()}")
@@ -137,10 +202,15 @@ def run_natural_cfr_training(args):
         try:
             emergency_checkpoint = f"natural_cfr_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
             trainer.save_training_state(emergency_checkpoint)
+            checkpoint_msg = f"Emergency checkpoint saved: {emergency_checkpoint}"
+            logger.info(checkpoint_msg)
             print(f"💾 Emergency checkpoint saved: {emergency_checkpoint}")
-        except:
+        except Exception as save_error:
+            save_error_msg = f"Could not save emergency checkpoint: {save_error}"
+            logger.error(save_error_msg)
             print("❌ Could not save emergency checkpoint")
         
+        flush_logs(logger)
         return None
 
 
@@ -151,6 +221,17 @@ def run_demo_mode(args):
     Args:
         args: Command line arguments
     """
+    # Set up logging for demo mode
+    logger = setup_logging("natural_cfr_demo")
+    
+    logger.info("🎮 Demo Mode: Natural Game CFR Training")
+    logger.info("=" * 50)
+    logger.info("Demo configuration:")
+    logger.info(f"  - Games to simulate: {args.games}")
+    logger.info(f"  - Epsilon exploration: 0.2 (higher for demo)")
+    logger.info(f"  - Min visit threshold: 3 (lower for demo)")
+    logger.info(f"  - Tournament survival penalty: 0.6")
+    
     print("🎮 Demo Mode: Natural Game CFR Training")
     print("=" * 50)
     print("This demo will:")
@@ -161,12 +242,17 @@ def run_demo_mode(args):
     print("")
     
     # Use demo-friendly parameters
+    logger.info("Initializing demo trainer with exploration-friendly parameters...")
     demo_trainer = NaturalGameCFRTrainer(
         epsilon_exploration=0.2,  # Higher exploration for demo
         min_visit_threshold=3,    # Lower threshold for demo
-        tournament_survival_penalty=0.6
+        tournament_survival_penalty=0.6,
+        logger=logger
     )
+    logger.info("Demo trainer initialized successfully")
     
+    demo_msg = f"Running demo with {args.games} games..."
+    logger.info(demo_msg)
     print(f"🎯 Running demo with {args.games} games...")
     
     # Run short demo training
@@ -176,11 +262,18 @@ def run_demo_mode(args):
         log_interval=max(args.games // 10, 10)    # Log 10 times during demo
     )
     
+    logger.info("Demo training completed successfully")
     print(f"\n🎉 Demo completed!")
     
     # Export demo results
+    logger.info("Exporting demo results...")
     demo_trainer.export_natural_scenarios_csv("demo_natural_scenarios.csv")
     demo_trainer.export_strategies_csv("demo_natural_strategies.csv")
+    logger.info("Demo results exported successfully")
+    
+    logger.info("DEMO RESULTS:")
+    logger.info(f"  Games played: {demo_results['games_played']:,}")
+    logger.info(f"  Scenarios discovered: {demo_results['unique_scenarios']}")
     
     print(f"\n📊 Demo Results:")
     print(f"   🎲 Games played: {demo_results['games_played']:,}")
@@ -197,11 +290,17 @@ def run_demo_mode(args):
         hero_win_rate = sum(s['hero_won'] for s in scenarios) / len(scenarios)
         three_bet_rate = sum(s['is_3bet'] for s in scenarios) / len(scenarios)
         
+        logger.info("GAMEPLAY STATISTICS:")
+        logger.info(f"  Hero win rate: {hero_win_rate:.1%}")
+        logger.info(f"  Showdown rate: {showdown_rate:.1%}")
+        logger.info(f"  3-bet rate: {three_bet_rate:.1%}")
+        
         print(f"\n🎯 Gameplay Statistics:")
         print(f"   👑 Hero win rate: {hero_win_rate:.1%}")
         print(f"   🎲 Showdown rate: {showdown_rate:.1%}")
         print(f"   🔥 3-bet rate: {three_bet_rate:.1%}")
     
+    flush_logs(logger)
     return demo_trainer
 
 
@@ -212,23 +311,41 @@ def run_analysis_mode(args):
     Args:
         args: Command line arguments
     """
+    # Set up logging for analysis mode
+    logger = setup_logging("natural_cfr_analysis")
+    
+    logger.info("📊 Analysis Mode: Natural CFR Results")
+    logger.info("=" * 50)
+    
     print("📊 Analysis Mode: Natural CFR Results")
     print("=" * 50)
     
     if not args.resume or not Path(args.resume).exists():
+        error_msg = f"Checkpoint file required for analysis mode - {args.resume}"
+        logger.error(error_msg)
         print(f"❌ Checkpoint file required for analysis mode")
         print(f"   Use --resume <checkpoint.pkl> to specify checkpoint")
         return None
     
     # Load trainer from checkpoint
-    trainer = NaturalGameCFRTrainer()
+    logger.info(f"Loading training state from: {args.resume}")
+    trainer = NaturalGameCFRTrainer(logger=logger)
     if not trainer.load_training_state(args.resume):
+        error_msg = f"Failed to load checkpoint {args.resume}"
+        logger.error(error_msg)
         print(f"❌ Failed to load checkpoint {args.resume}")
         return None
     
+    logger.info(f"Successfully loaded training state from {args.resume}")
     print(f"✅ Loaded training state from {args.resume}")
     
     # Analyze results
+    logger.info("TRAINING ANALYSIS:")
+    logger.info(f"  Total games played: {trainer.natural_metrics['games_played']:,}")
+    logger.info(f"  Unique scenarios: {trainer.natural_metrics['unique_scenarios']}")
+    logger.info(f"  Hero strategies learned: {len(trainer.strategy_sum)}")
+    logger.info(f"  Villain strategies learned: {len(trainer.villain_strategy_sum)}")
+    
     print(f"\n📈 TRAINING ANALYSIS:")
     print(f"   🎲 Total games played: {trainer.natural_metrics['games_played']:,}")
     print(f"   📊 Unique scenarios: {trainer.natural_metrics['unique_scenarios']}")
@@ -237,10 +354,19 @@ def run_analysis_mode(args):
     
     if trainer.natural_scenarios:
         scenarios = trainer.natural_scenarios
+        hero_win_rate = sum(s['hero_won'] for s in scenarios) / len(scenarios)
+        showdown_rate = sum(s['showdown'] for s in scenarios) / len(scenarios)
+        three_bet_rate = sum(s['is_3bet'] for s in scenarios) / len(scenarios)
+        
+        logger.info("GAMEPLAY ANALYSIS:")
+        logger.info(f"  Hero win rate: {hero_win_rate:.1%}")
+        logger.info(f"  Showdown rate: {showdown_rate:.1%}")
+        logger.info(f"  3-bet rate: {three_bet_rate:.1%}")
+        
         print(f"\n🎯 Gameplay Analysis:")
-        print(f"   👑 Hero win rate: {sum(s['hero_won'] for s in scenarios) / len(scenarios):.1%}")
-        print(f"   🎲 Showdown rate: {sum(s['showdown'] for s in scenarios) / len(scenarios):.1%}")
-        print(f"   🔥 3-bet rate: {sum(s['is_3bet'] for s in scenarios) / len(scenarios):.1%}")
+        print(f"   👑 Hero win rate: {hero_win_rate:.1%}")
+        print(f"   🎲 Showdown rate: {showdown_rate:.1%}")
+        print(f"   🔥 3-bet rate: {three_bet_rate:.1%}")
         
         # Analyze hand categories
         hand_categories = {}
@@ -248,21 +374,33 @@ def run_analysis_mode(args):
             cat = scenario['hand_category']
             hand_categories[cat] = hand_categories.get(cat, 0) + 1
         
+        logger.info("HAND CATEGORY DISTRIBUTION:")
         print(f"\n📊 Hand Category Distribution:")
         for cat, count in sorted(hand_categories.items(), key=lambda x: x[1], reverse=True):
             percentage = (count / len(scenarios)) * 100
+            logger.info(f"  {cat}: {count} games ({percentage:.1f}%)")
             print(f"   {cat:15s}: {count:4d} games ({percentage:5.1f}%)")
     
     # Export analysis results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    trainer.export_natural_scenarios_csv(f"analysis_scenarios_{timestamp}.csv")
-    trainer.export_strategies_csv(f"analysis_strategies_{timestamp}.csv")
+    scenarios_file = f"analysis_scenarios_{timestamp}.csv"
+    strategies_file = f"analysis_strategies_{timestamp}.csv"
+    
+    logger.info(f"Exporting analysis results with timestamp {timestamp}...")
+    trainer.export_natural_scenarios_csv(scenarios_file)
+    trainer.export_strategies_csv(strategies_file)
+    
+    logger.info(f"Analysis exported to:")
+    logger.info(f"  Scenarios: {scenarios_file}")
+    logger.info(f"  Hero strategies: hero_{strategies_file}")
+    logger.info(f"  Villain strategies: villain_{strategies_file}")
     
     print(f"\n📁 Analysis exported to:")
-    print(f"   📊 analysis_scenarios_{timestamp}.csv")
-    print(f"   🎯 hero_analysis_strategies_{timestamp}.csv")
-    print(f"   🎯 villain_analysis_strategies_{timestamp}.csv")
+    print(f"   📊 {scenarios_file}")
+    print(f"   🎯 hero_{strategies_file}")
+    print(f"   🎯 villain_{strategies_file}")
     
+    flush_logs(logger)
     return trainer
 
 
@@ -324,21 +462,38 @@ Examples:
     
     args = parser.parse_args()
     
+    # Set up main logger for argument validation and main execution
+    logger = setup_logging("natural_cfr_main")
+    
+    # Log the command line arguments
+    logger.info("Natural CFR Training Started")
+    logger.info(f"Command line arguments: {vars(args)}")
+    
     # Validate arguments
     if args.games <= 0:
+        error_msg = "Number of games must be positive"
+        logger.error(error_msg)
         print("❌ Number of games must be positive")
         sys.exit(1)
     
     if not (0.0 <= args.epsilon <= 1.0):
+        error_msg = "Epsilon must be between 0.0 and 1.0"
+        logger.error(error_msg)
         print("❌ Epsilon must be between 0.0 and 1.0")
         sys.exit(1)
     
     if args.mode == 'analysis' and not args.resume:
+        error_msg = "Analysis mode requires --resume checkpoint file"
+        logger.error(error_msg)
         print("❌ Analysis mode requires --resume checkpoint file")
         sys.exit(1)
     
+    logger.info("Arguments validated successfully")
+    
     # Run appropriate mode
     try:
+        logger.info(f"Starting {args.mode} mode...")
+        
         if args.mode == 'demo':
             trainer = run_demo_mode(args)
         elif args.mode == 'analysis':
@@ -347,16 +502,26 @@ Examples:
             trainer = run_natural_cfr_training(args)
         
         if trainer:
+            success_msg = f"Natural CFR {args.mode} session completed successfully!"
+            logger.info(success_msg)
             print(f"\n✅ Natural CFR training session completed successfully!")
         else:
+            error_msg = f"{args.mode} session failed"
+            logger.error(error_msg)
             print(f"\n❌ Training session failed")
             sys.exit(1)
             
     except Exception as e:
+        error_msg = f"Unexpected error in {args.mode} mode: {e}"
+        logger.error(error_msg)
+        log_exception(logger, f"Unexpected error in {args.mode} mode")
         print(f"\n💥 Unexpected error: {e}")
         import traceback
         print(f"🔍 Traceback:\n{traceback.format_exc()}")
         sys.exit(1)
+    finally:
+        # Ensure all logs are flushed
+        flush_logs(logger)
 
 
 if __name__ == "__main__":

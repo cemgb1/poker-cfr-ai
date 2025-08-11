@@ -1,0 +1,12 @@
+scenario_key,hand_category,example_hands,position,stack_depth,blinds_level,training_games,actions_pruned_count,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
+trash|BTN|very_deep|medium,trash,"72o, 83o, 94o",BTN,very_deep,medium,0,0,RAISE_HIGH,0.588,0.067,0.067,0.0,0.0,0.181,0.098,0.588
+trash|BTN|very_deep|low,trash,"72o, 83o, 94o",BTN,very_deep,low,0,0,CALL_SMALL,0.571,0.071,0.571,0.071,0.071,0.071,0.071,0.071
+trash|BTN|very_deep|high,trash,"72o, 83o, 94o",BTN,very_deep,high,0,0,RAISE_HIGH,0.377,0.178,0.279,0.029,0.029,0.08,0.029,0.377
+trash|BB|very_deep|medium,trash,"72o, 83o, 94o",BB,very_deep,medium,0,0,CALL_SMALL,0.321,0.071,0.321,0.238,0.155,0.071,0.071,0.071
+trash|BB|medium|medium,trash,"72o, 83o, 94o",BB,medium,medium,0,0,FOLD,0.25,0.25,0.25,0.0,0.0,0.25,0.25,0.0
+trash|BTN|deep|high,trash,"72o, 83o, 94o",BTN,deep,high,0,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
+trash|BB|very_deep|high,trash,"72o, 83o, 94o",BB,very_deep,high,0,0,FOLD,0.2,0.2,0.2,0.0,0.0,0.2,0.2,0.2
+trash|BTN|medium|high,trash,"72o, 83o, 94o",BTN,medium,high,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
+trash|BTN|medium|medium,trash,"72o, 83o, 94o",BTN,medium,medium,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
+trash|BB|deep|low,trash,"72o, 83o, 94o",BB,deep,low,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
+trash|BB|deep|medium,trash,"72o, 83o, 94o",BB,deep,medium,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
