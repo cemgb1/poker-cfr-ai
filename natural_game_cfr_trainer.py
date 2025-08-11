@@ -67,7 +67,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def __init__(self, enable_pruning=True, regret_pruning_threshold=-300.0,
                  strategy_pruning_threshold=0.001, tournament_survival_penalty=0.6,
-                 epsilon_exploration=0.1, min_visit_threshold=5):
+                 epsilon_exploration=0.1, min_visit_threshold=5, logger=None):
         """
         Initialize Natural Game CFR Trainer.
         
@@ -78,7 +78,22 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             tournament_survival_penalty: Factor to scale tournament bust penalties
             epsilon_exploration: Probability of forced exploration
             min_visit_threshold: Minimum visits before considering scenario trained
+            logger: Logger instance for logging (optional)
         """
+        # Store logger
+        from logging_config import get_logger
+        self.logger = logger if logger else get_logger("natural_game_cfr_trainer")
+        
+        # Log initialization parameters
+        self.logger.info("Initializing Natural Game CFR Trainer")
+        self.logger.info("Initialization parameters:")
+        self.logger.info(f"  - enable_pruning: {enable_pruning}")
+        self.logger.info(f"  - regret_pruning_threshold: {regret_pruning_threshold}")
+        self.logger.info(f"  - strategy_pruning_threshold: {strategy_pruning_threshold}")
+        self.logger.info(f"  - tournament_survival_penalty: {tournament_survival_penalty}")
+        self.logger.info(f"  - epsilon_exploration: {epsilon_exploration}")
+        self.logger.info(f"  - min_visit_threshold: {min_visit_threshold}")
+        
         # Initialize base trainer without pre-defined scenarios
         super().__init__(
             scenarios=None,  # No pre-defined scenarios
@@ -118,6 +133,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'avg_pot_size': 0.0,
             'exploration_rate': 0.0
         }
+        
+        self.logger.info("🎲 Natural Game CFR Trainer Initialized!")
+        self.logger.info(f"   🎯 Epsilon exploration: {self.epsilon_exploration}")
+        self.logger.info(f"   📊 Min visit threshold: {self.min_visit_threshold}")
+        self.logger.info(f"   🏆 Tournament survival penalty: {self.tournament_survival_penalty}")
+        self.logger.info(f"   ✂️ Pruning enabled: {self.enable_pruning}")
         
         print(f"🎲 Natural Game CFR Trainer Initialized!")
         print(f"   🎯 Epsilon exploration: {self.epsilon_exploration}")
@@ -804,6 +825,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         Returns:
             dict: Training statistics
         """
+        self.logger.info("🚀 Starting Natural Game CFR Training")
+        self.logger.info(f"   🎲 Games to simulate: {n_games:,}")
+        self.logger.info(f"   💾 Save interval: every {save_interval} games")
+        self.logger.info(f"   📝 Log interval: every {log_interval} games")
+        self.logger.info("=" * 60)
+        
         print(f"🚀 Starting Natural Game CFR Training")
         print(f"   🎲 Games to simulate: {n_games:,}")
         print(f"   💾 Save interval: every {save_interval} games")
@@ -814,7 +841,13 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         for game_num in range(n_games):
             # Simulate one game
-            game_result = self.monte_carlo_game_simulation()
+            try:
+                game_result = self.monte_carlo_game_simulation()
+            except Exception as e:
+                self.logger.error(f"Error in game {game_num + 1}: {e}")
+                from logging_config import log_exception
+                log_exception(self.logger, f"Error in game {game_num + 1}")
+                continue  # Skip this game and continue training
             
             # Log progress
             if (game_num + 1) % log_interval == 0:
@@ -822,10 +855,17 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             
             # Save progress
             if (game_num + 1) % save_interval == 0:
-                self.save_training_state(f"natural_cfr_checkpoint_{game_num + 1}.pkl")
+                checkpoint_file = f"natural_cfr_checkpoint_{game_num + 1}.pkl"
+                self.save_training_state(checkpoint_file)
         
         training_end_time = time.time()
         total_training_time = training_end_time - training_start_time
+        
+        self.logger.info("🎉 Natural Game CFR Training Complete!")
+        self.logger.info(f"   ⏱️  Total time: {total_training_time/60:.1f} minutes")
+        self.logger.info(f"   🎲 Games played: {self.natural_metrics['games_played']:,}")
+        self.logger.info(f"   📊 Unique scenarios: {self.natural_metrics['unique_scenarios']}")
+        self.logger.info(f"   🎯 Total scenarios recorded: {len(self.natural_scenarios)}")
         
         print(f"\n🎉 Natural Game CFR Training Complete!")
         print(f"   ⏱️  Total time: {total_training_time/60:.1f} minutes")
@@ -851,19 +891,64 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             start_time: Training start timestamp
         """
         elapsed_time = time.time() - start_time
-        games_per_minute = (games_completed / elapsed_time) * 60
+        games_per_minute = (games_completed / elapsed_time) * 60 if elapsed_time > 0 else 0
         
-        # Calculate win rates
+        # Calculate win rates and other statistics
         if self.natural_scenarios:
             hero_wins = sum(1 for s in self.natural_scenarios if s['hero_won'])
             hero_win_rate = hero_wins / len(self.natural_scenarios)
+            showdown_rate = sum(1 for s in self.natural_scenarios if s['showdown']) / len(self.natural_scenarios)
+            three_bet_rate = sum(1 for s in self.natural_scenarios if s['is_3bet']) / len(self.natural_scenarios)
+            avg_pot_size = sum(s['final_pot_bb'] for s in self.natural_scenarios) / len(self.natural_scenarios)
         else:
             hero_win_rate = 0.0
+            showdown_rate = 0.0
+            three_bet_rate = 0.0
+            avg_pot_size = 0.0
         
-        print(f"Game {games_completed:6,}: "
-              f"{self.natural_metrics['unique_scenarios']:3d} scenarios, "
-              f"hero_wr={hero_win_rate:.2f}, "
-              f"rate={games_per_minute:.1f}/min")
+        # Estimate time remaining
+        if games_per_minute > 0:
+            remaining_games = self.natural_metrics.get('games_target', 10000) - games_completed
+            if remaining_games > 0:
+                eta_minutes = remaining_games / games_per_minute
+                eta_str = f", ETA: {eta_minutes:.1f}min"
+            else:
+                eta_str = ""
+        else:
+            eta_str = ""
+        
+        # Console output
+        console_msg = (f"Game {games_completed:6,}: "
+                      f"{self.natural_metrics['unique_scenarios']:3d} scenarios, "
+                      f"hero_wr={hero_win_rate:.2f}, "
+                      f"rate={games_per_minute:.1f}/min{eta_str}")
+        print(console_msg)
+        
+        # Detailed logging
+        self.logger.info(f"TRAINING PROGRESS - Game {games_completed:,}")
+        self.logger.info(f"  Time elapsed: {elapsed_time/60:.1f} minutes")
+        self.logger.info(f"  Games per minute: {games_per_minute:.1f}")
+        self.logger.info(f"  Total games played: {self.natural_metrics['games_played']:,}")
+        self.logger.info(f"  Monte Carlo iterations completed: {games_completed:,}")
+        self.logger.info(f"  Unique scenarios discovered: {self.natural_metrics['unique_scenarios']}")
+        self.logger.info(f"  Total scenarios recorded: {len(self.natural_scenarios)}")
+        
+        if self.natural_scenarios:
+            self.logger.info(f"  Hero win rate: {hero_win_rate:.3f}")
+            self.logger.info(f"  Showdown rate: {showdown_rate:.3f}")
+            self.logger.info(f"  3-bet rate: {three_bet_rate:.3f}")
+            self.logger.info(f"  Average pot size: {avg_pot_size:.2f} BB")
+        
+        # Log exploration statistics
+        total_state_actions = sum(len(actions) for actions in self.state_action_visits.values())
+        self.logger.info(f"  State-action pairs visited: {total_state_actions}")
+        
+        if eta_str:
+            self.logger.info(f"  Estimated time remaining: {eta_minutes:.1f} minutes")
+        
+        # Update metrics
+        self.natural_metrics['hero_win_rate'] = hero_win_rate
+        self.natural_metrics['avg_pot_size'] = avg_pot_size
     
     def save_training_state(self, filename):
         """
@@ -872,27 +957,45 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         Args:
             filename: File to save to
         """
-        save_data = {
-            'hero_regret_sum': dict(self.regret_sum),
-            'hero_strategy_sum': dict(self.strategy_sum),
-            'villain_regret_sum': dict(self.villain_regret_sum),
-            'villain_strategy_sum': dict(self.villain_strategy_sum),
-            'natural_scenarios': self.natural_scenarios,
-            'natural_scenario_counter': dict(self.natural_scenario_counter),
-            'state_action_visits': dict(self.state_action_visits),
-            'natural_metrics': self.natural_metrics,
-            'training_parameters': {
-                'epsilon_exploration': self.epsilon_exploration,
-                'min_visit_threshold': self.min_visit_threshold,
-                'tournament_survival_penalty': self.tournament_survival_penalty
-            },
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        with open(filename, 'wb') as f:
-            pickle.dump(save_data, f)
-        
-        print(f"💾 Training state saved to {filename}")
+        try:
+            self.logger.info(f"Saving training state to {filename}...")
+            
+            save_data = {
+                'hero_regret_sum': dict(self.regret_sum),
+                'hero_strategy_sum': dict(self.strategy_sum),
+                'villain_regret_sum': dict(self.villain_regret_sum),
+                'villain_strategy_sum': dict(self.villain_strategy_sum),
+                'natural_scenarios': self.natural_scenarios,
+                'natural_scenario_counter': dict(self.natural_scenario_counter),
+                'state_action_visits': dict(self.state_action_visits),
+                'natural_metrics': self.natural_metrics,
+                'training_parameters': {
+                    'epsilon_exploration': self.epsilon_exploration,
+                    'min_visit_threshold': self.min_visit_threshold,
+                    'tournament_survival_penalty': self.tournament_survival_penalty
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            with open(filename, 'wb') as f:
+                pickle.dump(save_data, f)
+            
+            self.logger.info(f"✅ Training state saved successfully to {filename}")
+            self.logger.info(f"   Games played: {self.natural_metrics['games_played']:,}")
+            self.logger.info(f"   Unique scenarios: {self.natural_metrics['unique_scenarios']}")
+            self.logger.info(f"   File size: {Path(filename).stat().st_size / 1024 / 1024:.1f} MB")
+            
+            print(f"💾 Training state saved to {filename}")
+            
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to save training state to {filename}: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, f"Failed to save training state to {filename}")
+            print(f"❌ Failed to save training state: {e}")
+            return False
     
     def load_training_state(self, filename):
         """
@@ -905,6 +1008,16 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             bool: True if loaded successfully
         """
         try:
+            self.logger.info(f"Attempting to load training state from {filename}...")
+            
+            if not Path(filename).exists():
+                error_msg = f"Checkpoint file {filename} does not exist"
+                self.logger.error(error_msg)
+                return False
+            
+            file_size = Path(filename).stat().st_size / 1024 / 1024
+            self.logger.info(f"Loading checkpoint file (size: {file_size:.1f} MB)...")
+            
             with open(filename, 'rb') as f:
                 save_data = pickle.load(f)
             
@@ -918,6 +1031,22 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             self.state_action_visits = defaultdict(lambda: defaultdict(int), save_data['state_action_visits'])
             self.natural_metrics = save_data['natural_metrics']
             
+            # Log loaded state information
+            self.logger.info("✅ Training state loaded successfully")
+            self.logger.info(f"   Checkpoint created: {save_data.get('timestamp', 'Unknown')}")
+            self.logger.info(f"   Games played: {self.natural_metrics['games_played']:,}")
+            self.logger.info(f"   Unique scenarios: {self.natural_metrics['unique_scenarios']}")
+            self.logger.info(f"   Hero strategies: {len(self.strategy_sum)}")
+            self.logger.info(f"   Villain strategies: {len(self.villain_strategy_sum)}")
+            self.logger.info(f"   Natural scenarios recorded: {len(self.natural_scenarios)}")
+            
+            # Log training parameters from checkpoint
+            if 'training_parameters' in save_data:
+                params = save_data['training_parameters']
+                self.logger.info("   Loaded training parameters:")
+                for key, value in params.items():
+                    self.logger.info(f"     {key}: {value}")
+            
             print(f"✅ Training state loaded from {filename}")
             print(f"   🎲 Games played: {self.natural_metrics['games_played']:,}")
             print(f"   📊 Unique scenarios: {self.natural_metrics['unique_scenarios']}")
@@ -925,6 +1054,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             return True
             
         except Exception as e:
+            error_msg = f"Failed to load training state from {filename}: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, f"Failed to load training state from {filename}")
             print(f"❌ Failed to load training state: {e}")
             return False
     
@@ -936,21 +1069,48 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             filename: Output CSV filename
         """
         if not self.natural_scenarios:
+            error_msg = "No natural scenarios to export"
+            self.logger.warning(error_msg)
             print("❌ No natural scenarios to export")
             return
         
-        df = pd.DataFrame(self.natural_scenarios)
-        df.to_csv(filename, index=False)
-        
-        print(f"📊 Exported {len(self.natural_scenarios)} natural scenarios to {filename}")
-        
-        # Show summary statistics
-        print(f"\n📈 NATURAL SCENARIOS SUMMARY:")
-        print(f"Total scenarios: {len(self.natural_scenarios)}")
-        print(f"Unique scenario keys: {len(self.natural_scenario_counter)}")
-        print(f"Hero win rate: {sum(s['hero_won'] for s in self.natural_scenarios) / len(self.natural_scenarios):.3f}")
-        print(f"Showdown rate: {sum(s['showdown'] for s in self.natural_scenarios) / len(self.natural_scenarios):.3f}")
-        print(f"3-bet rate: {sum(s['is_3bet'] for s in self.natural_scenarios) / len(self.natural_scenarios):.3f}")
+        try:
+            self.logger.info(f"Exporting {len(self.natural_scenarios)} natural scenarios to {filename}...")
+            
+            df = pd.DataFrame(self.natural_scenarios)
+            df.to_csv(filename, index=False)
+            
+            file_size = Path(filename).stat().st_size / 1024
+            self.logger.info(f"✅ Successfully exported natural scenarios to {filename} ({file_size:.1f} KB)")
+            
+            # Calculate and log summary statistics
+            hero_win_rate = sum(s['hero_won'] for s in self.natural_scenarios) / len(self.natural_scenarios)
+            showdown_rate = sum(s['showdown'] for s in self.natural_scenarios) / len(self.natural_scenarios)
+            three_bet_rate = sum(s['is_3bet'] for s in self.natural_scenarios) / len(self.natural_scenarios)
+            
+            self.logger.info("NATURAL SCENARIOS SUMMARY:")
+            self.logger.info(f"  Total scenarios: {len(self.natural_scenarios)}")
+            self.logger.info(f"  Unique scenario keys: {len(self.natural_scenario_counter)}")
+            self.logger.info(f"  Hero win rate: {hero_win_rate:.3f}")
+            self.logger.info(f"  Showdown rate: {showdown_rate:.3f}")
+            self.logger.info(f"  3-bet rate: {three_bet_rate:.3f}")
+            
+            print(f"📊 Exported {len(self.natural_scenarios)} natural scenarios to {filename}")
+            
+            # Show summary statistics
+            print(f"\n📈 NATURAL SCENARIOS SUMMARY:")
+            print(f"Total scenarios: {len(self.natural_scenarios)}")
+            print(f"Unique scenario keys: {len(self.natural_scenario_counter)}")
+            print(f"Hero win rate: {hero_win_rate:.3f}")
+            print(f"Showdown rate: {showdown_rate:.3f}")
+            print(f"3-bet rate: {three_bet_rate:.3f}")
+            
+        except Exception as e:
+            error_msg = f"Failed to export natural scenarios to {filename}: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, f"Failed to export natural scenarios to {filename}")
+            print(f"❌ Failed to export scenarios: {e}")
     
     def export_strategies_csv(self, filename="natural_strategies.csv"):
         """
@@ -959,51 +1119,73 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         Args:
             filename: Output CSV filename
         """
-        # Export hero strategies using parent method
-        hero_df = self.export_strategies_to_csv(f"hero_{filename}")
-        
-        # Export villain strategies
-        if self.villain_strategy_sum:
-            villain_data = []
+        try:
+            self.logger.info(f"Exporting strategies to {filename}...")
             
-            for scenario_key, strategy_counts in self.villain_strategy_sum.items():
-                if sum(strategy_counts.values()) > 0:
-                    parts = scenario_key.split("|")
-                    if len(parts) >= 4:
-                        hand_category, position, stack_category, blinds_level = parts[:4]
-                    else:
-                        continue
-                    
-                    # Calculate normalized probabilities
-                    total_count = sum(strategy_counts.values())
-                    action_probs = {}
-                    for action_name in ACTIONS.keys():
-                        action_probs[f"{action_name}_prob"] = strategy_counts.get(action_name, 0.0) / total_count
-                    
-                    # Find best action
-                    best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
-                    confidence = max(strategy_counts.values()) / total_count
-                    
-                    row = {
-                        'scenario_key': scenario_key,
-                        'hand_category': hand_category,
-                        'position': position,
-                        'stack_depth': stack_category,
-                        'blinds_level': blinds_level,
-                        'training_games': self.natural_scenario_counter.get(scenario_key, 0),
-                        'best_action': best_action.upper(),
-                        'confidence': round(confidence, 3),
-                        **{k: round(v, 3) for k, v in action_probs.items()}
-                    }
-                    villain_data.append(row)
+            # Export hero strategies using parent method
+            hero_filename = f"hero_{filename}"
+            self.logger.info(f"Exporting hero strategies to {hero_filename}...")
+            hero_df = self.export_strategies_to_csv(hero_filename)
             
-            if villain_data:
-                villain_df = pd.DataFrame(villain_data)
-                villain_df = villain_df.sort_values(['confidence', 'training_games'], ascending=[False, False])
-                villain_df.to_csv(f"villain_{filename}", index=False)
-                print(f"📊 Exported villain strategies to villain_{filename}")
-        
-        print(f"✅ Strategy export complete")
+            # Export villain strategies
+            villain_filename = f"villain_{filename}"
+            if self.villain_strategy_sum:
+                self.logger.info(f"Exporting villain strategies to {villain_filename}...")
+                villain_data = []
+                
+                for scenario_key, strategy_counts in self.villain_strategy_sum.items():
+                    if sum(strategy_counts.values()) > 0:
+                        parts = scenario_key.split("|")
+                        if len(parts) >= 4:
+                            hand_category, position, stack_category, blinds_level = parts[:4]
+                        else:
+                            continue
+                        
+                        # Calculate normalized probabilities
+                        total_count = sum(strategy_counts.values())
+                        action_probs = {}
+                        for action_name in ACTIONS.keys():
+                            action_probs[f"{action_name}_prob"] = strategy_counts.get(action_name, 0.0) / total_count
+                        
+                        # Find best action
+                        best_action = max(strategy_counts.items(), key=lambda x: x[1])[0]
+                        confidence = max(strategy_counts.values()) / total_count
+                        
+                        row = {
+                            'scenario_key': scenario_key,
+                            'hand_category': hand_category,
+                            'position': position,
+                            'stack_depth': stack_category,
+                            'blinds_level': blinds_level,
+                            'training_games': self.natural_scenario_counter.get(scenario_key, 0),
+                            'best_action': best_action.upper(),
+                            'confidence': round(confidence, 3),
+                            **{k: round(v, 3) for k, v in action_probs.items()}
+                        }
+                        villain_data.append(row)
+                
+                if villain_data:
+                    villain_df = pd.DataFrame(villain_data)
+                    villain_df = villain_df.sort_values(['confidence', 'training_games'], ascending=[False, False])
+                    villain_df.to_csv(villain_filename, index=False)
+                    
+                    villain_file_size = Path(villain_filename).stat().st_size / 1024
+                    self.logger.info(f"✅ Exported {len(villain_data)} villain strategies to {villain_filename} ({villain_file_size:.1f} KB)")
+                    print(f"📊 Exported villain strategies to {villain_filename}")
+                else:
+                    self.logger.warning("No villain strategy data to export")
+            else:
+                self.logger.warning("No villain strategies available to export")
+            
+            self.logger.info("✅ Strategy export completed successfully")
+            print(f"✅ Strategy export complete")
+            
+        except Exception as e:
+            error_msg = f"Failed to export strategies: {e}"
+            self.logger.error(error_msg)
+            from logging_config import log_exception
+            log_exception(self.logger, "Failed to export strategies")
+            print(f"❌ Failed to export strategies: {e}")
 
 
 if __name__ == "__main__":
