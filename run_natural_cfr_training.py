@@ -23,22 +23,204 @@ Usage:
 import argparse
 import time
 import sys
+import multiprocessing
+import os
+import glob
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from natural_game_cfr_trainer import NaturalGameCFRTrainer
 from logging_config import setup_logging, log_exception, flush_logs
 
 
+def find_latest_checkpoint():
+    """
+    Automatically find the latest checkpoint file in checkpoints/ directory or repo root.
+    
+    Returns:
+        str or None: Path to the latest checkpoint file, or None if none found
+    """
+    checkpoint_patterns = [
+        "checkpoints/*.pkl",  # Check checkpoints directory first
+        "*.pkl"               # Then check repo root
+    ]
+    
+    latest_checkpoint = None
+    latest_time = 0
+    
+    for pattern in checkpoint_patterns:
+        for checkpoint_file in glob.glob(pattern):
+            file_path = Path(checkpoint_file)
+            if file_path.is_file():
+                file_time = file_path.stat().st_mtime
+                if file_time > latest_time:
+                    latest_time = file_time
+                    latest_checkpoint = str(file_path)
+    
+    return latest_checkpoint
+
+
+def multiprocessing_worker(worker_id, games_per_worker, args):
+    """
+    Worker function for multiprocessing training.
+    
+    Args:
+        worker_id (int): Unique identifier for this worker
+        games_per_worker (int): Number of games this worker should process
+        args: Command line arguments
+        
+    Returns:
+        dict: Results from this worker including file paths and metrics
+    """
+    # Set up worker-specific logging
+    worker_logger = setup_logging(f"natural_cfr_worker_{worker_id}")
+    
+    worker_logger.info(f"🚀 Worker {worker_id} starting with {games_per_worker} games")
+    
+    # Initialize trainer for this worker
+    trainer = NaturalGameCFRTrainer(
+        enable_pruning=args.enable_pruning,
+        regret_pruning_threshold=args.regret_threshold,
+        strategy_pruning_threshold=args.strategy_threshold,
+        tournament_survival_penalty=args.tournament_penalty,
+        epsilon_exploration=args.epsilon,
+        min_visit_threshold=args.min_visits,
+        logger=worker_logger
+    )
+    
+    # Load checkpoint if this is worker 0 and resume is specified or auto-found
+    if worker_id == 0 and hasattr(args, '_resume_checkpoint') and args._resume_checkpoint:
+        worker_logger.info(f"Worker {worker_id} loading checkpoint: {args._resume_checkpoint}")
+        if Path(args._resume_checkpoint).exists():
+            if trainer.load_training_state(args._resume_checkpoint):
+                worker_logger.info(f"✅ Worker {worker_id} resumed from {args._resume_checkpoint}")
+            else:
+                worker_logger.warning(f"❌ Worker {worker_id} failed to load {args._resume_checkpoint}")
+        else:
+            worker_logger.warning(f"❌ Worker {worker_id} checkpoint file not found: {args._resume_checkpoint}")
+    
+    # Run training for this worker
+    training_start = time.time()
+    results = trainer.train(
+        n_games=games_per_worker,
+        save_interval=args.save_interval,
+        log_interval=args.log_interval
+    )
+    training_end = time.time()
+    training_duration = training_end - training_start
+    
+    # Generate worker-specific filenames with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Export worker-specific results
+    scenarios_file = f"worker_{worker_id}_natural_scenarios_{timestamp}.csv"
+    strategies_file = f"worker_{worker_id}_natural_strategies_{timestamp}.csv"
+    checkpoint_file = f"worker_{worker_id}_natural_cfr_{timestamp}.pkl"
+    
+    trainer.export_natural_scenarios_csv(scenarios_file)
+    trainer.export_strategies_csv(strategies_file)
+    trainer.save_training_state(checkpoint_file)
+    
+    worker_logger.info(f"✅ Worker {worker_id} completed {games_per_worker} games in {training_duration/60:.1f} minutes")
+    worker_logger.info(f"📁 Worker {worker_id} saved results:")
+    worker_logger.info(f"   📊 Scenarios: {scenarios_file}")
+    worker_logger.info(f"   🎯 Strategies: hero_{strategies_file} and villain_{strategies_file}")
+    worker_logger.info(f"   💾 Checkpoint: checkpoints/{checkpoint_file}")
+    
+    # Return results for aggregation
+    flush_logs(worker_logger)
+    return {
+        'worker_id': worker_id,
+        'games_played': results['games_played'],
+        'unique_scenarios': results['unique_scenarios'],
+        'hero_strategy_scenarios': results['hero_strategy_scenarios'],
+        'villain_strategy_scenarios': results['villain_strategy_scenarios'],
+        'training_duration': training_duration,
+        'scenarios_file': scenarios_file,
+        'strategies_file': strategies_file,
+        'checkpoint_file': checkpoint_file,
+        'hero_strategies_file': f"hero_{strategies_file}",
+        'villain_strategies_file': f"villain_{strategies_file}"
+    }
+
+
+def aggregate_worker_results(worker_results, args):
+    """
+    Aggregate results from all workers and create summary.
+    
+    Args:
+        worker_results (list): List of worker result dictionaries
+        args: Command line arguments
+        
+    Returns:
+        dict: Aggregated results
+    """
+    logger = setup_logging("natural_cfr_aggregator")
+    
+    logger.info("📊 Aggregating results from all workers...")
+    
+    # Calculate totals
+    total_games = sum(r['games_played'] for r in worker_results)
+    total_unique_scenarios = sum(r['unique_scenarios'] for r in worker_results) 
+    total_hero_scenarios = sum(r['hero_strategy_scenarios'] for r in worker_results)
+    total_villain_scenarios = sum(r['villain_strategy_scenarios'] for r in worker_results)
+    total_duration = max(r['training_duration'] for r in worker_results)  # Use max since parallel
+    
+    # Create aggregated results dictionary
+    aggregated = {
+        'total_workers': len(worker_results),
+        'total_games': total_games,
+        'total_unique_scenarios': total_unique_scenarios,
+        'total_hero_scenarios': total_hero_scenarios,
+        'total_villain_scenarios': total_villain_scenarios,
+        'total_duration': total_duration,
+        'games_per_minute': total_games / (total_duration / 60) if total_duration > 0 else 0,
+        'worker_files': {
+            'scenarios': [r['scenarios_file'] for r in worker_results],
+            'hero_strategies': [r['hero_strategies_file'] for r in worker_results],
+            'villain_strategies': [r['villain_strategies_file'] for r in worker_results],
+            'checkpoints': [r['checkpoint_file'] for r in worker_results]
+        }
+    }
+    
+    logger.info("📈 MULTI-WORKER TRAINING SUMMARY:")
+    logger.info(f"  Total workers: {aggregated['total_workers']}")
+    logger.info(f"  Total games played: {aggregated['total_games']:,}")
+    logger.info(f"  Total training time: {aggregated['total_duration']/60:.1f} minutes")
+    logger.info(f"  Games per minute: {aggregated['games_per_minute']:.1f}")
+    logger.info(f"  Total unique scenarios: {aggregated['total_unique_scenarios']}")
+    logger.info(f"  Total hero strategy scenarios: {aggregated['total_hero_scenarios']}")
+    logger.info(f"  Total villain strategy scenarios: {aggregated['total_villain_scenarios']}")
+    
+    # Calculate coverage
+    if aggregated['total_unique_scenarios'] > 0:
+        coverage_rate = (aggregated['total_unique_scenarios'] / 330) * 100  # 330 is theoretical max
+        logger.info(f"  Scenario space coverage: {coverage_rate:.1f}%")
+        aggregated['coverage_rate'] = coverage_rate
+    
+    logger.info("📁 Worker output files:")
+    for i, result in enumerate(worker_results):
+        logger.info(f"  Worker {result['worker_id']}:")
+        logger.info(f"    📊 Scenarios: {result['scenarios_file']}")
+        logger.info(f"    🎯 Hero strategies: {result['hero_strategies_file']}")
+        logger.info(f"    🎯 Villain strategies: {result['villain_strategies_file']}")
+        logger.info(f"    💾 Checkpoint: checkpoints/{result['checkpoint_file']}")
+    
+    flush_logs(logger)
+    return aggregated
+
+
 def run_natural_cfr_training(args):
     """
     Run natural CFR training with specified parameters.
+    Supports both single-process and multi-process training based on --workers argument.
     
     Args:
         args: Command line arguments
         
     Returns:
-        NaturalGameCFRTrainer: Trained model
+        NaturalGameCFRTrainer or dict: Trained model (single-process) or aggregated results (multi-process)
     """
     # Set up logging
     logger = setup_logging("natural_cfr_training")
@@ -47,195 +229,311 @@ def run_natural_cfr_training(args):
     logger.info("=" * 60)
     logger.info(f"Training mode: {args.mode}")
     logger.info(f"Games to simulate: {args.games:,}")
+    logger.info(f"Workers: {args.workers}")
     logger.info(f"Epsilon exploration: {args.epsilon}")
     logger.info(f"Min visit threshold: {args.min_visits}")
     logger.info(f"Tournament penalty: {args.tournament_penalty}")
     logger.info(f"Save interval: every {args.save_interval} games")
     logger.info(f"Log interval: every {args.log_interval} games")
     
-    # Log initialization parameters
-    logger.info("Model Initialization Parameters:")
-    logger.info(f"  - enable_pruning: {args.enable_pruning}")
-    logger.info(f"  - regret_pruning_threshold: {args.regret_threshold}")
-    logger.info(f"  - strategy_pruning_threshold: {args.strategy_threshold}")
-    logger.info(f"  - tournament_survival_penalty: {args.tournament_penalty}")
-    logger.info(f"  - epsilon_exploration: {args.epsilon}")
-    logger.info(f"  - min_visit_threshold: {args.min_visits}")
-    
-    print("🚀 Natural Game CFR Training System")
-    print("=" * 60)
-    print(f"🎲 Training mode: {args.mode}")
-    print(f"🎯 Games to simulate: {args.games:,}")
-    print(f"🔍 Epsilon exploration: {args.epsilon}")
-    print(f"📊 Min visit threshold: {args.min_visits}")
-    print(f"🏆 Tournament penalty: {args.tournament_penalty}")
-    print(f"💾 Save interval: every {args.save_interval} games")
-    print(f"📝 Log interval: every {args.log_interval} games")
-    
-    # Initialize trainer
-    logger.info("Initializing NaturalGameCFRTrainer...")
-    trainer = NaturalGameCFRTrainer(
-        enable_pruning=args.enable_pruning,
-        regret_pruning_threshold=args.regret_threshold,
-        strategy_pruning_threshold=args.strategy_threshold,
-        tournament_survival_penalty=args.tournament_penalty,
-        epsilon_exploration=args.epsilon,
-        min_visit_threshold=args.min_visits,
-        logger=logger
-    )
-    logger.info("Trainer initialized successfully")
-    
-    # Load checkpoint if specified
-    if args.resume:
-        logger.info(f"Attempting to resume training from checkpoint: {args.resume}")
-        if Path(args.resume).exists():
-            if trainer.load_training_state(args.resume):
-                success_msg = f"✅ Resumed training from {args.resume}"
-                logger.info(f"Successfully resumed training from {args.resume}")
-                print(success_msg)
-            else:
-                error_msg = f"❌ Failed to load {args.resume}, starting fresh"
-                logger.warning(f"Failed to load checkpoint {args.resume}, starting fresh training")
-                print(error_msg)
+    # Check for automatic checkpoint resume if --resume not specified
+    resume_checkpoint = args.resume
+    if not resume_checkpoint:
+        auto_checkpoint = find_latest_checkpoint()
+        if auto_checkpoint:
+            resume_checkpoint = auto_checkpoint
+            logger.info(f"🔍 Auto-discovered checkpoint: {resume_checkpoint}")
+            print(f"🔍 Auto-discovered checkpoint: {resume_checkpoint}")
         else:
-            error_msg = f"❌ Checkpoint file {args.resume} not found, starting fresh"
-            logger.warning(f"Checkpoint file {args.resume} not found, starting fresh training")
-            print(error_msg)
+            logger.info("🔍 No checkpoints found for auto-resume")
     
-    # Run training
-    training_msg = f"Starting natural game simulation with {args.games} games..."
-    logger.info(training_msg)
-    print(f"\n🎯 Starting natural game simulation...")
-    training_start = time.time()
+    # Store the checkpoint to use (for workers)
+    args._resume_checkpoint = resume_checkpoint
     
-    try:
-        results = trainer.train(
-            n_games=args.games,
-            save_interval=args.save_interval,
-            log_interval=args.log_interval
-        )
+    # Multi-process training (only for train mode and workers > 1)
+    if args.workers > 1 and args.mode == 'train':
+        logger.info(f"🔄 Starting multi-process training with {args.workers} workers")
+        print(f"🔄 Starting multi-process training with {args.workers} workers")
+        
+        # Ensure checkpoints directory exists
+        os.makedirs("checkpoints", exist_ok=True)
+        
+        # Calculate games per worker
+        games_per_worker = args.games // args.workers
+        remaining_games = args.games % args.workers
+        
+        logger.info(f"📊 Games distribution:")
+        logger.info(f"   Games per worker: {games_per_worker}")
+        logger.info(f"   Remaining games: {remaining_games} (will be distributed to first workers)")
+        
+        print(f"📊 Games distribution:")
+        print(f"   Games per worker: {games_per_worker}")
+        if remaining_games > 0:
+            print(f"   Extra games: {remaining_games} (distributed to first workers)")
+        
+        # Create worker arguments
+        worker_args = []
+        for worker_id in range(args.workers):
+            worker_games = games_per_worker + (1 if worker_id < remaining_games else 0)
+            worker_args.append((worker_id, worker_games, args))
+        
+        # Start multi-process training
+        training_start = time.time()
+        worker_results = []
+        
+        logger.info(f"🚀 Launching {args.workers} workers...")
+        print(f"🚀 Launching {args.workers} workers...")
+        
+        try:
+            with ProcessPoolExecutor(max_workers=args.workers) as executor:
+                # Submit all worker tasks
+                future_to_worker = {
+                    executor.submit(multiprocessing_worker, worker_id, worker_games, args): worker_id
+                    for worker_id, worker_games, _ in worker_args
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_worker):
+                    worker_id = future_to_worker[future]
+                    try:
+                        result = future.result()
+                        worker_results.append(result)
+                        logger.info(f"✅ Worker {worker_id} completed successfully")
+                        print(f"✅ Worker {worker_id} completed")
+                    except Exception as e:
+                        error_msg = f"❌ Worker {worker_id} failed: {e}"
+                        logger.error(error_msg)
+                        print(error_msg)
+                        # Continue with other workers
+        
+        except KeyboardInterrupt:
+            logger.warning("Training interrupted by user")
+            print(f"\n🛑 Training interrupted by user")
+            return None
         
         training_end = time.time()
-        training_duration = training_end - training_start
+        total_duration = training_end - training_start
         
-        success_msg = f"Training completed successfully in {training_duration/60:.1f} minutes"
-        logger.info(success_msg)
-        logger.info(f"Games per minute: {results['games_played'] / (training_duration/60):.1f}")
+        if not worker_results:
+            error_msg = "❌ All workers failed"
+            logger.error(error_msg)
+            print(error_msg)
+            return None
         
-        print(f"\n🎉 Training completed successfully!")
-        print(f"⏱️  Training time: {training_duration/60:.1f} minutes")
-        print(f"🎲 Games per minute: {results['games_played'] / (training_duration/60):.1f}")
+        # Aggregate results from all workers
+        aggregated_results = aggregate_worker_results(worker_results, args)
         
-        # Export results
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        print(f"\n🎉 Multi-worker training completed!")
+        print(f"⏱️  Total time: {total_duration/60:.1f} minutes")
+        print(f"🔄 Workers completed: {len(worker_results)}/{args.workers}")
+        print(f"🎲 Total games: {aggregated_results['total_games']:,}")
+        print(f"📊 Total unique scenarios: {aggregated_results['total_unique_scenarios']}")
+        print(f"⚡ Effective games per minute: {aggregated_results['games_per_minute']:.1f}")
         
-        export_msg = f"Exporting results with timestamp {timestamp}..."
-        logger.info(export_msg)
-        print(f"\n📊 Exporting results...")
+        if 'coverage_rate' in aggregated_results:
+            print(f"📈 Scenario space coverage: {aggregated_results['coverage_rate']:.1f}%")
         
-        scenarios_file = f"natural_scenarios_{timestamp}.csv"
-        strategies_file = f"natural_strategies_{timestamp}.csv"
+        print(f"\n📁 Worker output files:")
+        for i, result in enumerate(worker_results):
+            print(f"   Worker {result['worker_id']}:")
+            print(f"      📊 {result['scenarios_file']}")
+            print(f"      🎯 {result['hero_strategies_file']}")
+            print(f"      🎯 {result['villain_strategies_file']}")
+            print(f"      💾 checkpoints/{result['checkpoint_file']}")
         
-        trainer.export_natural_scenarios_csv(scenarios_file)
-        trainer.export_strategies_csv(strategies_file)
-        
-        logger.info(f"Exported natural scenarios to: {scenarios_file}")
-        logger.info(f"Exported strategies to: hero_{strategies_file} and villain_{strategies_file}")
-        
-        # Save final checkpoint (to checkpoints directory)
-        final_checkpoint = f"natural_cfr_final_{timestamp}.pkl"
-        trainer.save_training_state(final_checkpoint)
-        logger.info(f"Saved final checkpoint: checkpoints/{final_checkpoint}")
-        
-        # Create performance summary
-        logger.info("Creating performance summary...")
-        performance_file = trainer.create_performance_summary(training_duration, output_format='csv')
-        if performance_file:
-            logger.info(f"Performance summary created: {performance_file}")
-        
-        # Create final lookup table
-        logger.info("Creating final lookup table...")
-        lookup_table_file = trainer.create_final_lookup_table()
-        if lookup_table_file:
-            logger.info(f"Final lookup table created: {lookup_table_file}")
-        
-        # Archive old files
-        logger.info("Archiving old files...")
-        archived_items = trainer.archive_old_files()
-        if archived_items:
-            logger.info(f"Archived {len(archived_items)} old files/folders")
-        
-        print(f"\n📁 Results saved:")
-        print(f"   📊 Scenarios: {scenarios_file}")
-        print(f"   🎯 Hero strategies: hero_{strategies_file}")
-        print(f"   🎯 Villain strategies: villain_{strategies_file}")
-        print(f"   💾 Final checkpoint: checkpoints/{final_checkpoint}")
-        if performance_file:
-            print(f"   📈 Performance summary: {performance_file}")
-        if lookup_table_file:
-            print(f"   📋 Final lookup table: {lookup_table_file}")
-        if archived_items:
-            print(f"   📦 Archived items: {len(archived_items)} files/folders to archivedfileslocation/")
-        
-        # Show training summary
-        logger.info("TRAINING SUMMARY:")
-        logger.info(f"  Total games played: {results['games_played']:,}")
-        logger.info(f"  Unique scenarios discovered: {results['unique_scenarios']}")
-        logger.info(f"  Hero strategy scenarios: {results['hero_strategy_scenarios']}")
-        logger.info(f"  Villain strategy scenarios: {results['villain_strategy_scenarios']}")
-        
-        print(f"\n📈 TRAINING SUMMARY:")
-        print(f"   🎲 Total games played: {results['games_played']:,}")
-        print(f"   📊 Unique scenarios discovered: {results['unique_scenarios']}")
-        print(f"   🎯 Hero strategy scenarios: {results['hero_strategy_scenarios']}")
-        print(f"   🎯 Villain strategy scenarios: {results['villain_strategy_scenarios']}")
-        
-        # Calculate coverage
-        if results['unique_scenarios'] > 0:
-            coverage_rate = (results['unique_scenarios'] / 330) * 100  # 330 is theoretical max
-            logger.info(f"Scenario space coverage: {coverage_rate:.1f}%")
-            print(f"   📈 Scenario space coverage: {coverage_rate:.1f}%")
-        
+        logger.info("Multi-process training completed successfully")
         flush_logs(logger)
-        return trainer
+        return aggregated_results
+    
+    # Single-process training (original logic)
+    else:
+        if args.workers > 1:
+            logger.info(f"🔄 Falling back to single-process training (mode: {args.mode})")
+            print(f"🔄 Single-process mode (mode: {args.mode})")
         
-    except KeyboardInterrupt:
-        interrupt_msg = "Training interrupted by user"
-        logger.warning(interrupt_msg)
-        print(f"\n🛑 Training interrupted by user")
+        # Log initialization parameters
+        logger.info("Model Initialization Parameters:")
+        logger.info(f"  - enable_pruning: {args.enable_pruning}")
+        logger.info(f"  - regret_pruning_threshold: {args.regret_threshold}")
+        logger.info(f"  - strategy_pruning_threshold: {args.strategy_threshold}")
+        logger.info(f"  - tournament_survival_penalty: {args.tournament_penalty}")
+        logger.info(f"  - epsilon_exploration: {args.epsilon}")
+        logger.info(f"  - min_visit_threshold: {args.min_visits}")
         
-        # Save emergency checkpoint
-        emergency_checkpoint = f"natural_cfr_emergency_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
-        trainer.save_training_state(emergency_checkpoint)
-        checkpoint_msg = f"Emergency checkpoint saved: {emergency_checkpoint}"
-        logger.info(checkpoint_msg)
-        print(f"💾 Emergency checkpoint saved: {emergency_checkpoint}")
+        print("🚀 Natural Game CFR Training System")
+        print("=" * 60)
+        print(f"🎲 Training mode: {args.mode}")
+        print(f"🎯 Games to simulate: {args.games:,}")
+        print(f"🔍 Epsilon exploration: {args.epsilon}")
+        print(f"📊 Min visit threshold: {args.min_visits}")
+        print(f"🏆 Tournament penalty: {args.tournament_penalty}")
+        print(f"💾 Save interval: every {args.save_interval} games")
+        print(f"📝 Log interval: every {args.log_interval} games")
         
-        flush_logs(logger)
-        return trainer
+        # Initialize trainer
+        logger.info("Initializing NaturalGameCFRTrainer...")
+        trainer = NaturalGameCFRTrainer(
+            enable_pruning=args.enable_pruning,
+            regret_pruning_threshold=args.regret_threshold,
+            strategy_pruning_threshold=args.strategy_threshold,
+            tournament_survival_penalty=args.tournament_penalty,
+            epsilon_exploration=args.epsilon,
+            min_visit_threshold=args.min_visits,
+            logger=logger
+        )
+        logger.info("Trainer initialized successfully")
         
-    except Exception as e:
-        error_msg = f"Training failed with error: {e}"
-        logger.error(error_msg)
-        log_exception(logger, "Training failed")
-        print(f"\n❌ Training failed with error: {e}")
-        import traceback
-        print(f"🔍 Traceback:\n{traceback.format_exc()}")
+        # Load checkpoint if specified or auto-discovered
+        if resume_checkpoint:
+            logger.info(f"Attempting to resume training from checkpoint: {resume_checkpoint}")
+            if Path(resume_checkpoint).exists():
+                if trainer.load_training_state(resume_checkpoint):
+                    success_msg = f"✅ Resumed training from {resume_checkpoint}"
+                    logger.info(f"Successfully resumed training from {resume_checkpoint}")
+                    print(success_msg)
+                else:
+                    error_msg = f"❌ Failed to load {resume_checkpoint}, starting fresh"
+                    logger.warning(f"Failed to load checkpoint {resume_checkpoint}, starting fresh training")
+                    print(error_msg)
+            else:
+                error_msg = f"❌ Checkpoint file {resume_checkpoint} not found, starting fresh"
+                logger.warning(f"Checkpoint file {resume_checkpoint} not found, starting fresh training")
+                print(error_msg)
         
-        # Try to save emergency checkpoint
+        # Run training (original single-process logic continues...)
+        training_msg = f"Starting natural game simulation with {args.games} games..."
+        logger.info(training_msg)
+        print(f"\n🎯 Starting natural game simulation...")
+        training_start = time.time()
+        
         try:
-            emergency_checkpoint = f"natural_cfr_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+            results = trainer.train(
+                n_games=args.games,
+                save_interval=args.save_interval,
+                log_interval=args.log_interval
+            )
+            
+            training_end = time.time()
+            training_duration = training_end - training_start
+            
+            success_msg = f"Training completed successfully in {training_duration/60:.1f} minutes"
+            logger.info(success_msg)
+            logger.info(f"Games per minute: {results['games_played'] / (training_duration/60):.1f}")
+            
+            print(f"\n🎉 Training completed successfully!")
+            print(f"⏱️  Training time: {training_duration/60:.1f} minutes")
+            print(f"🎲 Games per minute: {results['games_played'] / (training_duration/60):.1f}")
+            
+            # Export results
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            export_msg = f"Exporting results with timestamp {timestamp}..."
+            logger.info(export_msg)
+            print(f"\n📊 Exporting results...")
+            
+            scenarios_file = f"natural_scenarios_{timestamp}.csv"
+            strategies_file = f"natural_strategies_{timestamp}.csv"
+            
+            trainer.export_natural_scenarios_csv(scenarios_file)
+            trainer.export_strategies_csv(strategies_file)
+            
+            logger.info(f"Exported natural scenarios to: {scenarios_file}")
+            logger.info(f"Exported strategies to: hero_{strategies_file} and villain_{strategies_file}")
+            
+            # Save final checkpoint (to checkpoints directory)
+            final_checkpoint = f"natural_cfr_final_{timestamp}.pkl"
+            trainer.save_training_state(final_checkpoint)
+            logger.info(f"Saved final checkpoint: checkpoints/{final_checkpoint}")
+            
+            # Create performance summary
+            logger.info("Creating performance summary...")
+            performance_file = trainer.create_performance_summary(training_duration, output_format='csv')
+            if performance_file:
+                logger.info(f"Performance summary created: {performance_file}")
+            
+            # Create final lookup table
+            logger.info("Creating final lookup table...")
+            lookup_table_file = trainer.create_final_lookup_table()
+            if lookup_table_file:
+                logger.info(f"Final lookup table created: {lookup_table_file}")
+            
+            # Archive old files
+            logger.info("Archiving old files...")
+            archived_items = trainer.archive_old_files()
+            if archived_items:
+                logger.info(f"Archived {len(archived_items)} old files/folders")
+            
+            print(f"\n📁 Results saved:")
+            print(f"   📊 Scenarios: {scenarios_file}")
+            print(f"   🎯 Hero strategies: hero_{strategies_file}")
+            print(f"   🎯 Villain strategies: villain_{strategies_file}")
+            print(f"   💾 Final checkpoint: checkpoints/{final_checkpoint}")
+            if performance_file:
+                print(f"   📈 Performance summary: {performance_file}")
+            if lookup_table_file:
+                print(f"   📋 Final lookup table: {lookup_table_file}")
+            if archived_items:
+                print(f"   📦 Archived items: {len(archived_items)} files/folders to archivedfileslocation/")
+            
+            # Show training summary
+            logger.info("TRAINING SUMMARY:")
+            logger.info(f"  Total games played: {results['games_played']:,}")
+            logger.info(f"  Unique scenarios discovered: {results['unique_scenarios']}")
+            logger.info(f"  Hero strategy scenarios: {results['hero_strategy_scenarios']}")
+            logger.info(f"  Villain strategy scenarios: {results['villain_strategy_scenarios']}")
+            
+            print(f"\n📈 TRAINING SUMMARY:")
+            print(f"   🎲 Total games played: {results['games_played']:,}")
+            print(f"   📊 Unique scenarios discovered: {results['unique_scenarios']}")
+            print(f"   🎯 Hero strategy scenarios: {results['hero_strategy_scenarios']}")
+            print(f"   🎯 Villain strategy scenarios: {results['villain_strategy_scenarios']}")
+            
+            # Calculate coverage
+            if results['unique_scenarios'] > 0:
+                coverage_rate = (results['unique_scenarios'] / 330) * 100  # 330 is theoretical max
+                logger.info(f"Scenario space coverage: {coverage_rate:.1f}%")
+                print(f"   📈 Scenario space coverage: {coverage_rate:.1f}%")
+            
+            flush_logs(logger)
+            return trainer
+            
+        except KeyboardInterrupt:
+            interrupt_msg = "Training interrupted by user"
+            logger.warning(interrupt_msg)
+            print(f"\n🛑 Training interrupted by user")
+            
+            # Save emergency checkpoint
+            emergency_checkpoint = f"natural_cfr_emergency_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
             trainer.save_training_state(emergency_checkpoint)
             checkpoint_msg = f"Emergency checkpoint saved: {emergency_checkpoint}"
             logger.info(checkpoint_msg)
             print(f"💾 Emergency checkpoint saved: {emergency_checkpoint}")
-        except Exception as save_error:
-            save_error_msg = f"Could not save emergency checkpoint: {save_error}"
-            logger.error(save_error_msg)
-            print("❌ Could not save emergency checkpoint")
-        
-        flush_logs(logger)
-        return None
+            
+            flush_logs(logger)
+            return trainer
+            
+        except Exception as e:
+            error_msg = f"Training failed with error: {e}"
+            logger.error(error_msg)
+            log_exception(logger, "Training failed")
+            print(f"\n❌ Training failed with error: {e}")
+            import traceback
+            print(f"🔍 Traceback:\n{traceback.format_exc()}")
+            
+            # Try to save emergency checkpoint
+            try:
+                emergency_checkpoint = f"natural_cfr_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+                trainer.save_training_state(emergency_checkpoint)
+                checkpoint_msg = f"Emergency checkpoint saved: {emergency_checkpoint}"
+                logger.info(checkpoint_msg)
+                print(f"💾 Emergency checkpoint saved: {emergency_checkpoint}")
+            except Exception as save_error:
+                save_error_msg = f"Could not save emergency checkpoint: {save_error}"
+                logger.error(save_error_msg)
+                print("❌ Could not save emergency checkpoint")
+            
+            flush_logs(logger)
+            return None
 
 
 def run_demo_mode(args):
@@ -460,20 +758,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run 10,000 game training session
-  python run_natural_cfr_training.py --games 10000
+  # Run 10,000 game training session (single-process)
+  python run_natural_cfr_training.py --games 10000 --workers 1
+  
+  # Run multi-core training with 4 workers
+  python run_natural_cfr_training.py --games 20000 --workers 4
+  
+  # Auto-resume from latest checkpoint with 8 workers (default)
+  python run_natural_cfr_training.py --games 50000
   
   # Quick demo with high exploration
   python run_natural_cfr_training.py --mode demo --games 1000
   
-  # Resume from checkpoint
-  python run_natural_cfr_training.py --resume checkpoint.pkl --games 5000
+  # Resume from specific checkpoint
+  python run_natural_cfr_training.py --resume checkpoint.pkl --games 5000 --workers 2
   
   # Analyze existing results
   python run_natural_cfr_training.py --mode analysis --resume final.pkl
   
-  # Custom parameters
-  python run_natural_cfr_training.py --games 20000 --epsilon 0.05 --tournament-penalty 0.4
+  # Custom parameters with multi-core
+  python run_natural_cfr_training.py --games 20000 --epsilon 0.05 --tournament-penalty 0.4 --workers 6
         """
     )
     
@@ -484,6 +788,8 @@ Examples:
     # Training parameters
     parser.add_argument('--games', type=int, default=10000,
                        help='Number of games to simulate (default: 10000)')
+    parser.add_argument('--workers', type=int, default=8,
+                       help='Number of parallel workers for training (default: 8, use 1 for single-process)')
     parser.add_argument('--epsilon', type=float, default=0.1,
                        help='Epsilon exploration rate (default: 0.1)')
     parser.add_argument('--min-visits', type=int, default=5,
@@ -524,6 +830,17 @@ Examples:
         logger.error(error_msg)
         print("❌ Number of games must be positive")
         sys.exit(1)
+    
+    if args.workers <= 0:
+        error_msg = "Number of workers must be positive"
+        logger.error(error_msg)
+        print("❌ Number of workers must be positive")
+        sys.exit(1)
+    
+    if args.workers > multiprocessing.cpu_count():
+        warning_msg = f"Warning: {args.workers} workers requested but only {multiprocessing.cpu_count()} CPUs available"
+        logger.warning(warning_msg)
+        print(f"⚠️  {warning_msg}")
     
     if not (0.0 <= args.epsilon <= 1.0):
         error_msg = "Epsilon must be between 0.0 and 1.0"

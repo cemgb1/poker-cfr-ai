@@ -222,3 +222,28 @@ natural_cfr_error_*.pkl
 demo_natural_scenarios.csv
 hero_demo_natural_strategies.csv
 villain_demo_natural_strategies.csv
+demo_final_lookup_table.csv
+
+# Generated training output files - workers and main
+worker_*_natural_scenarios_*.csv
+hero_worker_*_natural_strategies_*.csv
+villain_worker_*_natural_strategies_*.csv
+natural_scenarios_*.csv
+hero_natural_strategies_*.csv
+villain_natural_strategies_*.csv
+
+# Analysis output files
+analysis_scenarios_*.csv
+hero_analysis_strategies_*.csv
+villain_analysis_strategies_*.csv
+analysis_final_lookup_table_*.csv
+
+# Lookup table files
+*_final_lookup_table_*.csv
+
+# Performance tracking files
+performance/natural_cfr_performance_*.csv
+
+# Checkpoint files (all except example/template ones)
+checkpoints/natural_cfr_*.pkl
+checkpoints/worker_*.pkl
