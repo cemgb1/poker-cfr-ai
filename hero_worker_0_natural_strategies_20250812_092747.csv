@@ -1,8 +1,0 @@
-scenario_key,hand_category,example_hands,position,stack_depth,blinds_level,training_games,actions_pruned_count,best_action,confidence,fold_prob,call_small_prob,call_mid_prob,call_high_prob,raise_small_prob,raise_mid_prob,raise_high_prob
-trash|BTN|very_deep|high,trash,"72o, 83o, 94o",BTN,very_deep,high,0,0,FOLD,0.6,0.6,0.1,0.0,0.0,0.1,0.1,0.1
-trash|BB|ultra_short|medium,trash,"72o, 83o, 94o",BB,ultra_short,medium,0,0,FOLD,0.333,0.333,0.333,0.0,0.0,0.333,0.0,0.0
-trash|BTN|very_deep|low,trash,"72o, 83o, 94o",BTN,very_deep,low,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
-trash|BB|medium|low,trash,"72o, 83o, 94o",BB,medium,low,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
-trash|BB|deep|medium,trash,"72o, 83o, 94o",BB,deep,medium,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
-trash|BTN|deep|medium,trash,"72o, 83o, 94o",BTN,deep,medium,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
-trash|BTN|medium|medium,trash,"72o, 83o, 94o",BTN,medium,medium,0,0,FOLD,0.143,0.143,0.143,0.143,0.143,0.143,0.143,0.143
