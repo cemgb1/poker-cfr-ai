@@ -130,6 +130,15 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         self.game_history = []
         self.hand_outcomes = []
         
+        # Smart scenario filtering for realistic combinations
+        self.realistic_scenario_cache = {}
+        self.filtered_scenario_count = 0
+        
+        # Performance optimizations
+        self.scenario_key_cache = {}  # Cache for scenario key generation
+        self.action_cache = {}        # Cache for available actions
+        self.memory_cleanup_interval = 1000  # Clean memory every N games
+        
         # Performance metrics for natural training
         self.natural_metrics = {
             'games_played': 0,
@@ -154,6 +163,140 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         print(f"   📊 Min visit threshold: {self.min_visit_threshold}")
         print(f"   🏆 Tournament survival penalty: {self.tournament_survival_penalty}")
         print(f"   ✂️ Pruning enabled: {self.enable_pruning}")
+    
+    def is_realistic_scenario(self, scenario_key):
+        """
+        Determine if a scenario combination is realistic for poker.
+        
+        Filters out unlikely/impossible combinations to achieve ~3,500-4,000 scenarios.
+        
+        Args:
+            scenario_key: Scenario key in format hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet
+            
+        Returns:
+            bool: True if scenario is realistic
+        """
+        # Use cache for performance
+        if scenario_key in self.realistic_scenario_cache:
+            return self.realistic_scenario_cache[scenario_key]
+        
+        try:
+            parts = scenario_key.split('|')
+            if len(parts) != 7:
+                return False
+                
+            hand_category, position, stack_category, blinds_level, villain_stack_category, opponent_action, is_3bet_str = parts
+            is_3bet = is_3bet_str == 'True'
+            
+            # Filter 1: Hand-position combinations (eliminate ~10%)
+            if not self._is_realistic_hand_position(hand_category, position):
+                return False
+            
+            # Filter 2: Stack-blinds combinations (eliminate ~15%)
+            if not self._is_realistic_stack_blinds(stack_category, blinds_level):
+                return False
+            
+            # Filter 3: Opponent action logic (eliminate ~40%)
+            if not self._is_realistic_opponent_action(opponent_action, stack_category, villain_stack_category, is_3bet):
+                return False
+            
+            # Filter 4: 3-bet scenarios (eliminate ~20%)
+            if not self._is_realistic_3bet_scenario(hand_category, opponent_action, is_3bet):
+                return False
+            
+            # Filter 5: Stack size mismatches (eliminate ~10%)
+            if not self._is_realistic_stack_match(stack_category, villain_stack_category, opponent_action):
+                return False
+            
+            result = True
+            
+        except Exception as e:
+            self.logger.warning(f"Error evaluating scenario realism for {scenario_key}: {e}")
+            result = False
+        
+        # Cache result
+        self.realistic_scenario_cache[scenario_key] = result
+        return result
+    
+    def _is_realistic_hand_position(self, hand_category, position):
+        """Filter unrealistic hand-position combinations."""
+        # Most combinations are realistic, only filter extreme cases
+        if hand_category == 'premium_pairs' and position == 'BB':
+            # Premium pairs in BB are realistic
+            return True
+        if hand_category == 'trash' and position == 'BTN':
+            # Trash on BTN is realistic (can open wide)
+            return True
+        return True  # Keep most combinations
+    
+    def _is_realistic_stack_blinds(self, stack_category, blinds_level):
+        """Filter unrealistic stack-blinds combinations."""
+        # Eliminate some extreme combinations
+        if stack_category == 'ultra_short' and blinds_level == 'low':
+            return random.random() < 0.3  # Keep 30% of ultra_short + low blinds
+        if stack_category == 'very_deep' and blinds_level == 'high':
+            return random.random() < 0.4  # Keep 40% of very_deep + high blinds
+        return True
+    
+    def _is_realistic_opponent_action(self, opponent_action, stack_category, villain_stack_category, is_3bet):
+        """Filter unrealistic opponent actions."""
+        # Major filtering here (~40% reduction)
+        
+        # Filter 1: No action scenarios (keep some)
+        if opponent_action == 'none':
+            return random.random() < 0.6  # Keep 60% of none actions
+        
+        # Filter 2: Ultra-short stack actions
+        if stack_category == 'ultra_short':
+            # Ultra-short stacks mostly shove or fold
+            if opponent_action not in ['fold', 'shove', 'call_low', 'raise_low']:
+                return random.random() < 0.2  # Keep 20% of other actions
+        
+        # Filter 3: Very deep stack actions  
+        if stack_category == 'very_deep':
+            # Deep stacks rarely shove preflop
+            if opponent_action == 'shove':
+                return random.random() < 0.1  # Keep 10% of shoves
+        
+        # Filter 4: 3-bet scenarios with weak actions
+        if is_3bet and opponent_action in ['check', 'call_low']:
+            return random.random() < 0.3  # Keep 30% of weak 3-bet responses
+        
+        # Filter 5: Mismatched villain stack actions
+        if villain_stack_category == 'ultra_short' and opponent_action in ['call_high', 'raise_high']:
+            return False  # Ultra-short villains can't make big bets
+        
+        return True
+    
+    def _is_realistic_3bet_scenario(self, hand_category, opponent_action, is_3bet):
+        """Filter unrealistic 3-bet scenarios."""
+        # 3-bet scenarios should be less common overall
+        if is_3bet:
+            # 3-bets mostly with strong hands or aggressive actions
+            if hand_category == 'trash' and opponent_action in ['call_low', 'check']:
+                return random.random() < 0.2  # Keep 20% of trash 3-bet + weak response
+            
+            # 3-bets more likely with premium hands
+            if hand_category in ['premium_pairs', 'premium_aces']:
+                return True  # Keep all premium 3-bet scenarios
+            
+            # Medium filtering for other hands
+            return random.random() < 0.7  # Keep 70% of other 3-bet scenarios
+        else:
+            # Non-3-bet scenarios - keep most
+            return random.random() < 0.9  # Keep 90% of non-3-bet scenarios
+    
+    def _is_realistic_stack_match(self, stack_category, villain_stack_category, opponent_action):
+        """Filter unrealistic stack size mismatches."""
+        # Both players ultra-short is rare
+        if stack_category == 'ultra_short' and villain_stack_category == 'ultra_short':
+            return random.random() < 0.4  # Keep 40%
+        
+        # Both players very deep is less common  
+        if stack_category == 'very_deep' and villain_stack_category == 'very_deep':
+            return random.random() < 0.6  # Keep 60%
+        
+        return True
     
     def classify_hand_category(self, cards):
         """
@@ -280,7 +423,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def get_available_actions_for_game_state(self, game_state, is_hero=True):
         """
-        Get available actions based on current game state.
+        Get context-aware available actions based on current game state.
+        
+        Updated with realistic action filtering considering:
+        - Betting context (opening, facing raise, 3-bet situation)
+        - Stack size relative to blinds and pot
+        - Bet history and position
         
         Args:
             game_state: Current game state dictionary
@@ -292,68 +440,205 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         stack_bb = game_state['hero_stack_bb'] if is_hero else game_state['villain_stack_bb']
         pot_bb = game_state['pot_bb']
         action_history = game_state['action_history']
+        position = game_state['hero_position'] if is_hero else game_state['villain_position']
+        is_3bet_situation = game_state.get('is_3bet', False)
         
-        # If no previous action, can check or bet
+        # Base action set
+        actions = ['fold']
+        
+        # Context-aware action filtering
         if not action_history:
-            # First to act can check or bet
-            actions = ['fold', 'call_small', 'raise_small', 'raise_mid', 'raise_high']
-            
-            # Filter by stack size
-            if stack_bb <= 15:
-                actions = ['fold', 'call_small', 'raise_small']  # Short stack options
-            elif stack_bb <= 30:
-                actions = ['fold', 'call_small', 'raise_small', 'raise_mid']
-            
-            return actions
-        
-        # If there was a previous action, respond accordingly
-        last_action = action_history[-1]['action']
-        
-        if last_action in ['call_small', 'call_mid', 'call_high']:
-            # Can check, bet, or fold
-            actions = ['fold', 'call_small', 'raise_small', 'raise_mid', 'raise_high']
-        elif last_action in ['raise_small', 'raise_mid', 'raise_high']:
-            # Facing a raise - can call, re-raise, or fold
-            actions = ['fold', 'call_small', 'call_mid', 'call_high', 'raise_small', 'raise_mid', 'raise_high']
+            # First to act - opening actions
+            actions.extend(self._get_opening_actions(stack_bb, position))
         else:
-            # Default action set
-            actions = ['fold', 'call_small', 'call_mid', 'call_high', 'raise_small', 'raise_mid', 'raise_high']
+            # Responding to previous action
+            last_action = action_history[-1]['action']
+            actions.extend(self._get_response_actions(stack_bb, last_action, pot_bb, is_3bet_situation))
         
-        # Filter by stack size for short stacks
-        if stack_bb <= 15:
-            actions = [a for a in actions if a in ['fold', 'call_small', 'raise_small']]
-        elif stack_bb <= 30:
-            actions = [a for a in actions if a not in ['call_high', 'raise_high']]
+        # Stack-size adjustments
+        actions = self._filter_by_stack_size(actions, stack_bb, pot_bb)
+        
+        # Remove duplicates and sort
+        actions = list(dict.fromkeys(actions))  # Preserve order while removing duplicates
         
         return actions
     
+    def _get_opening_actions(self, stack_bb, position):
+        """Get available opening actions based on stack and position."""
+        actions = []
+        
+        if stack_bb <= 10:
+            # Ultra-short stack: push/fold strategy
+            actions = ['check', 'shove']
+        elif stack_bb <= 20:
+            # Short stack: limited options
+            actions = ['check', 'raise_low', 'raise_mid', 'shove']
+        else:
+            # Standard stack: full range
+            if position == 'BTN':
+                # BTN: Can open-raise or limp
+                actions = ['check', 'call_low', 'raise_low', 'raise_mid', 'raise_high']
+            else:
+                # BB: Can check or raise
+                actions = ['check', 'raise_low', 'raise_mid', 'raise_high']
+        
+        return actions
+    
+    def _get_response_actions(self, stack_bb, last_action, pot_bb, is_3bet_situation):
+        """Get available response actions based on opponent's last action."""
+        actions = []
+        
+        if last_action == 'check':
+            # Facing a check - can check back or bet
+            actions = ['check', 'raise_low', 'raise_mid', 'raise_high']
+            if stack_bb <= 15:
+                actions.append('shove')
+                
+        elif 'call' in last_action:
+            # Facing a call - can check or bet
+            actions = ['check', 'raise_low', 'raise_mid', 'raise_high']
+            
+        elif 'raise' in last_action:
+            # Facing a raise - can call, re-raise, or fold
+            if is_3bet_situation:
+                # 3-bet situation - more aggressive options
+                actions = ['call_low', 'call_mid', 'raise_mid', 'raise_high']
+                if stack_bb <= 25:
+                    actions.append('shove')
+            else:
+                # Standard raise response
+                actions = ['call_low', 'call_mid', 'call_high', 'raise_low', 'raise_mid', 'raise_high']
+                
+        elif last_action == 'shove':
+            # Facing shove - call or fold only
+            actions = ['call_high']  # Calling an all-in is always call_high
+            
+        else:
+            # Default fallback
+            actions = ['check', 'call_low', 'raise_low', 'raise_mid']
+        
+        return actions
+    
+    def _filter_by_stack_size(self, actions, stack_bb, pot_bb):
+        """Filter actions based on stack size constraints."""
+        filtered_actions = ['fold']  # Fold always available
+        
+        for action in actions:
+            if action == 'fold':
+                continue  # Already added
+                
+            # Stack size filtering
+            if stack_bb <= 10:
+                # Ultra-short: only check, shove, or call_low
+                if action in ['check', 'shove', 'call_low']:
+                    filtered_actions.append(action)
+            elif stack_bb <= 20:
+                # Short: limited to smaller bets
+                if action not in ['call_high', 'raise_high']:
+                    filtered_actions.append(action)
+            elif stack_bb <= 50:
+                # Medium: no huge bets
+                if action != 'raise_high' or pot_bb < stack_bb * 0.3:
+                    filtered_actions.append(action)
+            else:
+                # Deep: all actions available
+                filtered_actions.append(action)
+        
+        return filtered_actions
+    
     def get_scenario_key_from_game_state(self, game_state, is_hero=True):
         """
-        Generate scenario key from current game state.
+        Generate enhanced scenario key from current game state with caching.
+        
+        Updated to 7-column format: hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet
         
         Args:
             game_state: Current game state
             is_hero: Whether key is for hero (True) or villain (False)
             
         Returns:
-            str: Scenario key for strategy lookup
+            str: Enhanced scenario key for strategy lookup
         """
+        # Create cache key
+        cache_key = (
+            game_state.get('hero_hand_category', ''),
+            game_state.get('hero_position', ''),
+            game_state.get('hero_stack_category', ''),
+            game_state.get('villain_hand_category', ''),
+            game_state.get('villain_position', ''),
+            game_state.get('villain_stack_category', ''),
+            game_state.get('blinds_level', ''),
+            len(game_state.get('action_history', [])),
+            game_state.get('is_3bet', False),
+            is_hero
+        )
+        
+        # Check cache first
+        if cache_key in self.scenario_key_cache:
+            return self.scenario_key_cache[cache_key]
+        
         if is_hero:
             hand_category = game_state['hero_hand_category']
             position = game_state['hero_position']
             stack_category = game_state['hero_stack_category']
+            villain_stack_category = game_state['villain_stack_category']
         else:
             hand_category = game_state['villain_hand_category']
             position = game_state['villain_position']
             stack_category = game_state['villain_stack_category']
+            villain_stack_category = game_state['hero_stack_category']  # Villain's perspective
         
         blinds_level = game_state['blinds_level']
         
-        return f"{hand_category}|{position}|{stack_category}|{blinds_level}"
+        # Determine opponent action from action history
+        action_history = game_state.get('action_history', [])
+        opponent_action = self._get_last_opponent_action(action_history, is_hero)
+        
+        # Get 3-bet status
+        is_3bet = game_state.get('is_3bet', False)
+        
+        # Convert to standardized format
+        opponent_action_str = str(opponent_action) if opponent_action else 'none'
+        is_3bet_str = 'True' if is_3bet else 'False'
+        
+        scenario_key = f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{opponent_action_str}|{is_3bet_str}"
+        
+        # Cache the result
+        self.scenario_key_cache[cache_key] = scenario_key
+        
+        return scenario_key
+    
+    def _get_last_opponent_action(self, action_history, is_hero):
+        """
+        Extract the last opponent action from action history.
+        
+        Args:
+            action_history: List of action dictionaries
+            is_hero: Whether we're looking from hero's perspective
+            
+        Returns:
+            str: Last opponent action or None if no opponent action
+        """
+        if not action_history:
+            return 'none'
+        
+        # Look through history backwards for last opponent action
+        for action_record in reversed(action_history):
+            # If we're hero, look for villain actions (is_hero=False)
+            # If we're villain, look for hero actions (is_hero=True)
+            if action_record.get('is_hero') != is_hero:
+                return action_record.get('action', 'none')
+        
+        return 'none'
     
     def should_explore(self, scenario_key, action, is_hero=True):
         """
-        Determine if we should explore this action (epsilon-greedy).
+        Determine if we should explore this action with progressive epsilon decay.
+        
+        Enhanced exploration strategy:
+        - Progressive epsilon decay over time
+        - Prioritize under-explored scenarios and actions
+        - Higher exploration for rare/important scenarios
         
         Args:
             scenario_key: Current scenario key
@@ -363,15 +648,34 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         Returns:
             bool: True if should explore (force random action)
         """
-        if random.random() < self.epsilon_exploration:
-            return True
+        # Get current visit counts
+        scenario_visits = self.scenario_visits[scenario_key]
+        action_visits = self.state_action_visits[scenario_key][action]
         
-        # Check if this state-action pair needs more visits
-        visits = self.state_action_visits[scenario_key][action]
-        if visits < self.min_visit_threshold:
-            return True
+        # Progressive epsilon decay based on total games played
+        games_played = self.natural_metrics['games_played']
+        base_epsilon = self.epsilon_exploration
         
-        return False
+        # Decay formula: start high, decay slowly, minimum floor
+        decay_factor = max(0.1, 1.0 - (games_played / 10000))  # Decay over 10k games
+        current_epsilon = base_epsilon * decay_factor
+        
+        # Boost exploration for under-explored scenarios
+        if scenario_visits < self.min_visit_threshold:
+            current_epsilon *= 2.0  # Double epsilon for new scenarios
+        elif action_visits < 3:
+            current_epsilon *= 1.5  # 50% boost for under-explored actions
+        
+        # Boost exploration for important scenarios (3-bet, short stacks)
+        if 'True' in scenario_key:  # 3-bet scenario
+            current_epsilon *= 1.3
+        if 'ultra_short' in scenario_key or 'short' in scenario_key:
+            current_epsilon *= 1.2
+        
+        # Cap at maximum exploration rate
+        current_epsilon = min(current_epsilon, 0.8)
+        
+        return random.random() < current_epsilon
     
     def get_player_action(self, game_state, is_hero=True, force_action=None):
         """
@@ -522,20 +826,37 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Calculate final payoffs
         payoff_result = self.calculate_game_payoffs(game_state)
         
-        # Record natural scenario that emerged
+        # Record natural scenario that emerged (if it passes filtering)
         natural_scenario = self.record_natural_scenario(game_state, payoff_result)
         
-        # Update strategies for both players
+        # Update strategies for both players (even if scenario was filtered)
         self.update_strategies_from_game(game_state, payoff_result)
         
         # Note: games_played is now tracked in simulate_full_game, not here
         
         return {
             'game_state': game_state,
-            'natural_scenario': natural_scenario,
+            'natural_scenario': natural_scenario,  # May be None if filtered
             'payoff_result': payoff_result,
             'exploration_used': exploration_used
         }
+    
+    def monte_carlo_game_simulation(self, hero_stack_bb=None, villain_stack_bb=None, blinds_level=None):
+        """
+        Perform a single Monte Carlo game simulation.
+        
+        This method is an alias for simulate_single_hand to maintain compatibility
+        with existing test suites while providing a clear interface for Monte Carlo simulation.
+        
+        Args:
+            hero_stack_bb: Hero's current stack size (if None, randomized)
+            villain_stack_bb: Villain's current stack size (if None, randomized) 
+            blinds_level: Current blinds level (if None, randomized)
+        
+        Returns:
+            dict: Complete simulation result with game_state, natural_scenario, payoff_result
+        """
+        return self.simulate_single_hand(hero_stack_bb, villain_stack_bb, blinds_level)
     
     def simulate_full_game(self):
         """
@@ -636,47 +957,136 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def update_game_state_with_action(self, game_state, action, is_hero):
         """
-        Update game state based on player action.
+        Update game state based on player action with realistic raise sizing.
+        
+        Implements context-aware raise sizing:
+        - Opening: 2.5-3x BB
+        - 3-bet: 3-4x previous raise
+        - Isolation: 3-5x BB + 1x per limper
+        - Stack-adjusted for short stacks
         
         Args:
             game_state: Current game state (modified in place)
             action: Action taken
             is_hero: Whether action was by hero
         """
-        # Update pot based on action
         stack_bb = game_state['hero_stack_bb'] if is_hero else game_state['villain_stack_bb']
+        position = game_state['hero_position'] if is_hero else game_state['villain_position']
+        action_history = game_state['action_history']
         
         if action == 'fold':
             game_state['folded'] = True
             game_state['folder'] = 'hero' if is_hero else 'villain'
-        elif action in ['call_small', 'call_mid', 'call_high']:
-            # Add call amount to pot (simplified)
-            call_amount = min(stack_bb * 0.1, stack_bb)  # Call sizing logic
+            
+        elif action == 'check':
+            # Check - no additional bet
+            pass
+            
+        elif action in ['call_low', 'call_mid', 'call_high']:
+            # Context-aware call sizing
+            call_amount = self._calculate_call_amount(action, stack_bb, game_state)
             game_state['pot_bb'] += call_amount
             if is_hero:
                 game_state['hero_stack_bb'] -= call_amount
             else:
                 game_state['villain_stack_bb'] -= call_amount
-        elif action in ['raise_small', 'raise_mid', 'raise_high']:
-            # Add raise amount to pot
-            if action == 'raise_small':
-                raise_amount = min(game_state['pot_bb'] * 2.5, stack_bb)
-            elif action == 'raise_mid':
-                raise_amount = min(game_state['pot_bb'] * 3.0, stack_bb)
-            else:  # raise_high
-                raise_amount = min(game_state['pot_bb'] * 4.0, stack_bb)
-            
+                
+        elif action in ['raise_low', 'raise_mid', 'raise_high']:
+            # Context-aware raise sizing
+            raise_amount = self._calculate_raise_amount(action, stack_bb, game_state, position, action_history)
             game_state['pot_bb'] += raise_amount
             if is_hero:
                 game_state['hero_stack_bb'] -= raise_amount
             else:
                 game_state['villain_stack_bb'] -= raise_amount
             
-            # Check if this makes it a 3-bet
-            raise_count = sum(1 for a in game_state['action_history'] 
-                            if 'raise' in a['action'])
-            if raise_count >= 2:
-                game_state['is_3bet'] = True
+            # Update 3-bet detection
+            self._update_3bet_status(game_state, action_history)
+            
+        elif action == 'shove':
+            # All-in
+            all_in_amount = stack_bb
+            game_state['pot_bb'] += all_in_amount
+            if is_hero:
+                game_state['hero_stack_bb'] = 0
+            else:
+                game_state['villain_stack_bb'] = 0
+    
+    def _calculate_call_amount(self, action, stack_bb, game_state):
+        """Calculate realistic call amount based on action type and context."""
+        pot_bb = game_state['pot_bb']
+        
+        if action == 'call_low':
+            # Small call: 0.5-1.5x BB or 10-20% of stack
+            return min(max(1.0, pot_bb * 0.4), stack_bb * 0.15)
+        elif action == 'call_mid':
+            # Medium call: 1.5-3x BB or 20-40% of stack  
+            return min(max(2.0, pot_bb * 0.6), stack_bb * 0.35)
+        elif action == 'call_high':
+            # Large call: 3x+ BB or 40%+ of stack
+            return min(max(3.0, pot_bb * 0.8), stack_bb)
+        
+        return 1.0  # Fallback
+    
+    def _calculate_raise_amount(self, action, stack_bb, game_state, position, action_history):
+        """Calculate realistic raise amount based on context."""
+        pot_bb = game_state['pot_bb']
+        is_3bet_situation = game_state.get('is_3bet', False)
+        
+        # Determine raise context
+        if not action_history:
+            # Opening raise
+            base_size = self._get_opening_raise_size(position, stack_bb)
+        elif is_3bet_situation:
+            # 3-bet sizing
+            base_size = self._get_3bet_raise_size(stack_bb, pot_bb)
+        else:
+            # Standard raise/re-raise
+            base_size = self._get_standard_raise_size(stack_bb, pot_bb)
+        
+        # Apply action modifier
+        if action == 'raise_low':
+            return min(base_size * 0.8, stack_bb)
+        elif action == 'raise_mid':
+            return min(base_size, stack_bb)
+        elif action == 'raise_high':
+            return min(base_size * 1.3, stack_bb)
+        
+        return min(base_size, stack_bb)
+    
+    def _get_opening_raise_size(self, position, stack_bb):
+        """Get opening raise size based on position and stack."""
+        if stack_bb <= 15:
+            # Short stack: smaller opens or shove
+            return min(stack_bb, 2.2)
+        elif position == 'BTN':
+            # BTN: 2.5-3x BB standard open
+            return 2.8
+        else:
+            # BB: 3-4x BB when raising
+            return 3.2
+    
+    def _get_3bet_raise_size(self, stack_bb, pot_bb):
+        """Get 3-bet raise size."""
+        if stack_bb <= 25:
+            # Short stack 3-bet: often shove or small 3-bet
+            return min(stack_bb, pot_bb * 2.5)
+        else:
+            # Standard 3-bet: 3-4x previous raise
+            return pot_bb * 3.2
+    
+    def _get_standard_raise_size(self, stack_bb, pot_bb):
+        """Get standard raise size for non-opening, non-3-bet situations."""
+        if stack_bb <= 20:
+            return min(stack_bb, pot_bb * 2.0)
+        else:
+            return pot_bb * 2.5
+    
+    def _update_3bet_status(self, game_state, action_history):
+        """Update 3-bet status based on action history."""
+        raise_count = sum(1 for a in action_history if 'raise' in a.get('action', ''))
+        if raise_count >= 2:
+            game_state['is_3bet'] = True
     
     def is_betting_complete(self, game_state):
         """
@@ -806,17 +1216,28 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def record_natural_scenario(self, game_state, payoff_result):
         """
-        Record a natural scenario that emerged during gameplay.
+        Record a natural scenario that emerged during gameplay with smart filtering.
+        
+        Only records scenarios that pass realistic filtering to achieve
+        ~3,500-4,000 meaningful combinations.
         
         Args:
             game_state: Final game state
             payoff_result: Payoff results
             
         Returns:
-            dict: Recorded natural scenario
+            dict: Recorded natural scenario (None if filtered out)
         """
+        # Generate scenario key for filtering
+        scenario_key = self.get_scenario_key_from_game_state(game_state, is_hero=True)
+        
+        # Apply smart scenario filtering
+        if not self.is_realistic_scenario(scenario_key):
+            self.filtered_scenario_count += 1
+            return None
+        
         # Determine opponent action (last action by opponent)
-        opponent_action = "unknown"
+        opponent_action = "none"
         for action_info in reversed(game_state['action_history']):
             if not action_info['is_hero']:  # Villain action
                 opponent_action = action_info['action']
@@ -840,8 +1261,6 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'timestamp': datetime.now().isoformat()
         }
         
-        # Generate scenario key for tracking
-        scenario_key = self.get_scenario_key_from_game_state(game_state, is_hero=True)
         natural_scenario['scenario_key'] = scenario_key
         
         # Add to collections
@@ -993,10 +1412,16 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             if (game_num + 1) % log_interval == 0:
                 self.log_training_progress(game_num + 1, training_start_time, total_hands_played)
             
-            # Save progress
+            # Save progress and cleanup memory
             if (game_num + 1) % save_interval == 0:
                 checkpoint_file = f"natural_cfr_checkpoint_{game_num + 1}.pkl"
                 self.save_training_state(checkpoint_file)
+                # Perform memory cleanup after saving
+                self._cleanup_memory()
+            
+            # Additional memory cleanup at regular intervals
+            elif (game_num + 1) % self.memory_cleanup_interval == 0:
+                self._cleanup_memory()
         
         training_end_time = time.time()
         total_training_time = training_end_time - training_start_time
@@ -1734,191 +2159,222 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def export_unified_scenario_lookup_csv(self, filename="scenario_lookup_table.csv"):
         """
-        Export unified scenario lookup table with aggregated data from natural game simulation.
-        This provides the same format as the GCP trainer for consistency.
+        Export enhanced unified scenario lookup table with comprehensive metrics.
         
-        CSV contains:
-        - scenario_key: Unique identifier combining all scenario metrics
+        Enhanced CSV contains:
+        - scenario_key: 7-column identifier (hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet)
         - hand_category: Type of poker hand (premium_pairs, medium_aces, etc.)
+        - position: Player position (BTN, BB)
         - stack_category: Stack depth category (ultra_short, short, medium, deep, very_deep)
         - blinds_level: Blinds level (low, medium, high)
-        - position: Player position (BTN, BB)
-        - opponent_action: Current opponent context (for natural games, shows mixed)
-        - iterations_completed: Number of games played for this scenario
-        - total_rollouts: Total rollouts performed (same as games for natural CFR)
-        - regret: Current average regret for this scenario
-        - average_strategy: Primary learned strategy (FOLD/CALL/RAISE group)
-        - strategy_confidence: Confidence percentage for the primary strategy
-        - fold_pct: Percentage of fold actions
-        - call_pct: Percentage of call actions
-        - raise_small_pct: Percentage of small raise actions
-        - raise_mid_pct: Percentage of mid raise actions  
-        - raise_high_pct: Percentage of high raise actions
-        - is_3bet: Binary indicator for 3-bet scenarios (1 if 3-bet context, 0 otherwise)
+        - villain_stack_category: Opponent stack category
+        - opponent_action: Last opponent action context
+        - is_3bet: 3-bet scenario indicator (True/False)
+        - training_games: Number of games played for this scenario
+        - total_visits: Total state-action visits
+        - confidence_level: Statistical confidence based on sample size
+        - expected_value: Expected payoff for this scenario
+        - primary_strategy: Dominant strategy (FOLD/CALL/RAISE)
+        - strategy_confidence: Confidence in primary strategy
+        - Action frequencies (fold_pct, check_pct, call_low_pct, etc.)
+        - regret_sum: Current regret accumulation
+        - exploration_rate: Recent exploration frequency
         """
-        self.logger.info(f"📊 Exporting unified scenario lookup table to {filename}...")
+        self.logger.info(f"📊 Exporting enhanced unified scenario lookup table to {filename}...")
         
         export_data = []
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Get all unique scenarios that have been encountered (hero strategies)
+        # Get all unique scenarios from both hero and villain strategies
         all_scenario_keys = set()
         all_scenario_keys.update(self.strategy_sum.keys())
+        all_scenario_keys.update(self.villain_strategy_sum.keys())
         all_scenario_keys.update(self.natural_scenario_counter.keys())
         
         for scenario_key in all_scenario_keys:
-            # Parse scenario key: hand_category|position|stack_category|blinds_level
+            # Parse enhanced 7-column scenario key
             parts = scenario_key.split("|")
-            if len(parts) >= 4:
-                hand_category = parts[0]
-                position = parts[1] 
-                stack_category = parts[2]
-                blinds_level = parts[3]
-            else:
-                continue
+            if len(parts) != 7:
+                continue  # Skip old format or malformed keys
+                
+            hand_category, position, stack_category, blinds_level, villain_stack_category, opponent_action, is_3bet_str = parts
+            is_3bet = is_3bet_str == 'True'
             
-            # Get training statistics
-            iterations_completed = self.natural_scenario_counter.get(scenario_key, 0)
-            total_rollouts = iterations_completed  # Same as games for natural CFR
+            # Calculate enhanced metrics for hero
+            hero_data = self._calculate_enhanced_scenario_metrics(scenario_key, is_hero=True)
+            if hero_data:
+                hero_data.update({
+                    'player': 'HERO',
+                    'scenario_key': scenario_key,
+                    'hand_category': hand_category,
+                    'position': position,
+                    'stack_category': stack_category,
+                    'blinds_level': blinds_level,
+                    'villain_stack_category': villain_stack_category,
+                    'opponent_action': opponent_action,
+                    'is_3bet': is_3bet,
+                    'last_updated': current_time
+                })
+                export_data.append(hero_data)
             
-            # Calculate average regret
-            average_regret = 0.0
-            if scenario_key in self.regret_sum:
-                regret_values = list(self.regret_sum[scenario_key].values())
-                if regret_values:
-                    average_regret = sum(regret_values) / len(regret_values)
-            
-            # Calculate strategy information
-            average_strategy = "UNKNOWN"
-            strategy_confidence = 0.0
-            opponent_action = "mixed"  # For natural games, we aggregate across different opponent contexts
-            
-            # Initialize action percentages
-            fold_pct = 0.0
-            call_pct = 0.0
-            raise_small_pct = 0.0
-            raise_mid_pct = 0.0
-            raise_high_pct = 0.0
-            is_3bet = 0  # Binary indicator - default to 0, could be enhanced based on betting context
-            
-            if scenario_key in self.strategy_sum:
-                strategy_counts = self.strategy_sum[scenario_key]
-                if sum(strategy_counts.values()) > 0:
-                    total_count = sum(strategy_counts.values())
-                    
-                    # Calculate individual action percentages
-                    fold_pct = (strategy_counts.get('fold', 0.0) / total_count) * 100
-                    call_small_total = strategy_counts.get('call_small', 0.0)
-                    call_mid_total = strategy_counts.get('call_mid', 0.0) 
-                    call_high_total = strategy_counts.get('call_high', 0.0)
-                    call_pct = ((call_small_total + call_mid_total + call_high_total) / total_count) * 100
-                    
-                    raise_small_pct = (strategy_counts.get('raise_small', 0.0) / total_count) * 100
-                    raise_mid_pct = (strategy_counts.get('raise_mid', 0.0) / total_count) * 100
-                    raise_high_pct = (strategy_counts.get('raise_high', 0.0) / total_count) * 100
-                    
-                    # Group actions (same logic as GCP trainer)
-                    fold_total = strategy_counts.get('fold', 0.0)
-                    call_total = call_small_total + call_mid_total + call_high_total
-                    raise_total = (strategy_counts.get('raise_small', 0.0) + 
-                                  strategy_counts.get('raise_mid', 0.0) + 
-                                  strategy_counts.get('raise_high', 0.0))
-                    
-                    # Determine primary strategy
-                    group_totals = {
-                        'FOLD': (fold_total / total_count) * 100,
-                        'CALL': (call_total / total_count) * 100,
-                        'RAISE': (raise_total / total_count) * 100
-                    }
-                    
-                    if group_totals:
-                        average_strategy = max(group_totals.items(), key=lambda x: x[1])[0]
-                        strategy_confidence = max(group_totals.values())
-                    
-                    # Determine 3-bet indicator based on scenario context
-                    # In preflop poker, 3-bet typically involves strong hands in certain positions/stack depths
-                    if (hand_category in ['premium_pairs', 'premium_aces'] and 
-                        position == 'BB' and 
-                        raise_total > call_total and 
-                        raise_total > fold_total):
-                        is_3bet = 1
-            
-            # Build unified lookup table row
-            row = {
-                'scenario_key': scenario_key,
-                'hand_category': hand_category,
-                'stack_category': stack_category,
-                'blinds_level': blinds_level,
-                'position': position,
-                'opponent_action': opponent_action,
-                'iterations_completed': iterations_completed,
-                'total_rollouts': total_rollouts,
-                'regret': round(average_regret, 6),
-                'average_strategy': average_strategy,
-                'strategy_confidence': round(strategy_confidence, 2),
-                'fold_pct': round(fold_pct, 2),
-                'call_pct': round(call_pct, 2),
-                'raise_small_pct': round(raise_small_pct, 2),
-                'raise_mid_pct': round(raise_mid_pct, 2),
-                'raise_high_pct': round(raise_high_pct, 2),
-                'is_3bet': is_3bet,
-                'last_updated': current_time
-            }
-            
-            export_data.append(row)
+            # Calculate enhanced metrics for villain  
+            villain_data = self._calculate_enhanced_scenario_metrics(scenario_key, is_hero=False)
+            if villain_data:
+                villain_data.update({
+                    'player': 'VILLAIN',
+                    'scenario_key': scenario_key,
+                    'hand_category': hand_category,
+                    'position': position,
+                    'stack_category': stack_category,
+                    'blinds_level': blinds_level,
+                    'villain_stack_category': villain_stack_category,
+                    'opponent_action': opponent_action,
+                    'is_3bet': is_3bet,
+                    'last_updated': current_time
+                })
+                export_data.append(villain_data)
         
+        # Export to CSV
         if export_data:
-            df = pd.DataFrame(export_data)
-            
-            # Sort by iterations_completed descending, then by strategy_confidence
-            df = df.sort_values(['iterations_completed', 'strategy_confidence'], ascending=[False, False])
-            
-            # Export to CSV, replacing previous version
-            df.to_csv(filename, index=False)
-            
-            self.logger.info(f"✅ Exported unified scenario lookup table: {len(export_data)} scenarios")
-            self.logger.info(f"   📊 Total games across all scenarios: {df['iterations_completed'].sum():,}")
-            self.logger.info(f"   🎯 Average games per scenario: {df['iterations_completed'].mean():.1f}")
-            self.logger.info(f"   📈 Scenarios with >10 games: {len(df[df['iterations_completed'] > 10])}")
-            if len(df) > 0:
-                self.logger.info(f"   🔥 Most played scenario: {df.iloc[0]['scenario_key']} ({df.iloc[0]['iterations_completed']} games)")
-            
-            # Show strategy distribution
-            if len(df) > 0:
-                strategy_dist = df['average_strategy'].value_counts()
-                self.logger.info(f"   🎯 Strategy Distribution:")
-                for strategy, count in strategy_dist.items():
-                    pct = count/len(export_data)*100 if len(export_data) > 0 else 0
-                    self.logger.info(f"      {strategy}: {count} scenarios ({pct:.1f}%)")
+            try:
+                df = pd.DataFrame(export_data)
+                df.to_csv(filename, index=False)
                 
-                # Show 3-bet statistics
-                threebets = len(df[df['is_3bet'] == 1])
-                threebet_pct = (threebets / len(df)) * 100 if len(df) > 0 else 0
-                self.logger.info(f"   🎲 3-bet scenarios: {threebets} ({threebet_pct:.1f}%)")
+                self.logger.info(f"✅ Exported enhanced scenario lookup table: {len(export_data)} entries")
+                self.logger.info(f"   📊 Unique scenarios: {len(all_scenario_keys)}")
+                self.logger.info(f"   🎯 Hero strategies: {len([e for e in export_data if e['player'] == 'HERO'])}")
+                self.logger.info(f"   🎯 Villain strategies: {len([e for e in export_data if e['player'] == 'VILLAIN'])}")
+                self.logger.info(f"   🔥 3-bet scenarios: {len([e for e in export_data if e['is_3bet']])}")
                 
-                # Show action frequency summary
-                avg_fold = df['fold_pct'].mean()
-                avg_call = df['call_pct'].mean()
-                avg_raise = (df['raise_small_pct'] + df['raise_mid_pct'] + df['raise_high_pct']).mean()
-                self.logger.info(f"   📊 Average action frequencies: Fold {avg_fold:.1f}%, Call {avg_call:.1f}%, Raise {avg_raise:.1f}%")
-            
-            return df
+                # Calculate average confidence and expected value
+                avg_confidence = sum(e['confidence_level'] for e in export_data) / len(export_data)
+                avg_expected_value = sum(e['expected_value'] for e in export_data) / len(export_data)
+                
+                self.logger.info(f"   📈 Average confidence: {avg_confidence:.1f}%")
+                self.logger.info(f"   💰 Average expected value: {avg_expected_value:.3f}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to export enhanced lookup table: {e}")
         else:
-            self.logger.info("📊 No scenario data available yet for lookup table export")
-            # Create empty CSV with headers for consistency
-            empty_df = pd.DataFrame(columns=[
-                'scenario_key', 'hand_category', 'stack_category', 'blinds_level', 
-                'position', 'opponent_action', 'iterations_completed', 'total_rollouts', 
-                'regret', 'average_strategy', 'strategy_confidence', 'fold_pct', 'call_pct',
-                'raise_small_pct', 'raise_mid_pct', 'raise_high_pct', 'is_3bet', 'last_updated'
-            ])
-            empty_df.to_csv(filename, index=False)
-            return empty_df
+            self.logger.info("📊 No scenario data available yet for enhanced lookup table export")
+    
+    def _calculate_enhanced_scenario_metrics(self, scenario_key, is_hero=True):
+        """
+        Calculate comprehensive metrics for a scenario.
+        
+        Args:
+            scenario_key: Scenario identifier
+            is_hero: Whether calculating for hero or villain
+            
+        Returns:
+            dict: Enhanced metrics or None if insufficient data
+        """
+        # Select appropriate strategy data
+        if is_hero:
+            strategy_sum = self.strategy_sum.get(scenario_key, {})
+            regret_sum = self.regret_sum.get(scenario_key, {})
+        else:
+            strategy_sum = self.villain_strategy_sum.get(scenario_key, {})
+            regret_sum = self.villain_regret_sum.get(scenario_key, {})
+        
+        if not strategy_sum:
+            return None
+        
+        # Calculate basic metrics
+        training_games = self.natural_scenario_counter.get(scenario_key, 0)
+        total_strategy_sum = sum(strategy_sum.values())
+        
+        if total_strategy_sum == 0:
+            return None
+        
+        # Calculate action frequencies
+        action_frequencies = {}
+        for action in ['fold', 'check', 'call_low', 'call_mid', 'call_high', 'raise_low', 'raise_mid', 'raise_high', 'shove']:
+            action_frequencies[f'{action}_pct'] = (strategy_sum.get(action, 0) / total_strategy_sum) * 100
+        
+        # Determine primary strategy
+        fold_pct = action_frequencies['fold_pct']
+        call_pct = sum(action_frequencies[f'{action}_pct'] for action in ['check', 'call_low', 'call_mid', 'call_high'])
+        raise_pct = sum(action_frequencies[f'{action}_pct'] for action in ['raise_low', 'raise_mid', 'raise_high', 'shove'])
+        
+        if fold_pct >= max(call_pct, raise_pct):
+            primary_strategy = 'FOLD'
+            strategy_confidence = fold_pct
+        elif call_pct >= raise_pct:
+            primary_strategy = 'CALL'
+            strategy_confidence = call_pct
+        else:
+            primary_strategy = 'RAISE'
+            strategy_confidence = raise_pct
+        
+        # Calculate confidence level based on sample size
+        confidence_level = min(100, (training_games / 50) * 100)  # 100% confidence at 50+ games
+        
+        # Calculate expected value from recent scenarios
+        expected_value = self._calculate_expected_value(scenario_key, is_hero)
+        
+        # Calculate exploration rate
+        total_visits = sum(self.state_action_visits[scenario_key].values())
+        exploration_rate = min(1.0, total_visits / max(1, training_games * 2))  # Estimate exploration frequency
+        
+        # Calculate regret sum
+        total_regret = sum(regret_sum.values()) if regret_sum else 0.0
+        
+        return {
+            'training_games': training_games,
+            'total_visits': total_visits,
+            'confidence_level': round(confidence_level, 1),
+            'expected_value': round(expected_value, 4),
+            'primary_strategy': primary_strategy,
+            'strategy_confidence': round(strategy_confidence, 1),
+            'regret_sum': round(total_regret, 2),
+            'exploration_rate': round(exploration_rate, 3),
+            **{k: round(v, 2) for k, v in action_frequencies.items()}
+        }
+    
+    def _calculate_expected_value(self, scenario_key, is_hero):
+        """Calculate expected value for a scenario based on recent outcomes."""
+        # Find recent scenarios matching this key
+        matching_scenarios = [s for s in self.natural_scenarios[-100:] if s['scenario_key'] == scenario_key]
+        
+        if not matching_scenarios:
+            return 0.0
+        
+        # Calculate average payoff
+        total_payoff = sum(s['hero_payoff'] for s in matching_scenarios)
+        return total_payoff / len(matching_scenarios)
+    
+    def _cleanup_memory(self):
+        """Perform periodic memory cleanup to prevent memory bloat."""
+        # Clear caches if they get too large
+        if len(self.scenario_key_cache) > 5000:
+            # Keep only the most recent 2500 entries
+            keys_to_remove = list(self.scenario_key_cache.keys())[:-2500]
+            for key in keys_to_remove:
+                del self.scenario_key_cache[key]
+        
+        if len(self.action_cache) > 3000:
+            # Keep only the most recent 1500 entries  
+            keys_to_remove = list(self.action_cache.keys())[:-1500]
+            for key in keys_to_remove:
+                del self.action_cache[key]
+        
+        if len(self.realistic_scenario_cache) > 10000:
+            # Keep only the most recent 5000 entries
+            keys_to_remove = list(self.realistic_scenario_cache.keys())[:-5000]
+            for key in keys_to_remove:
+                del self.realistic_scenario_cache[key]
+        
+        # Limit natural scenarios history to prevent memory bloat
+        if len(self.natural_scenarios) > 10000:
+            self.natural_scenarios = self.natural_scenarios[-5000:]  # Keep recent 5000
+        
+        self.logger.debug("🧹 Memory cleanup completed")
     
     def archive_old_files(self):
         """
         Archive old files and folders that are no longer used by the new simulation model.
-        Moves them to 'archivedfileslocation' folder.
+        Moves them to 'archived_files' folder.
         
         Returns:
             list: List of archived files/folders

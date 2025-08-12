@@ -61,12 +61,18 @@ def test_game_simulation():
         natural_scenario = result['natural_scenario']
         payoff_result = result['payoff_result']
         
-        print(f"   Cards: {natural_scenario['hero_cards']} vs {natural_scenario['villain_cards']}")
-        print(f"   Scenario: {natural_scenario['scenario_key']}")
-        print(f"   Actions: {len(natural_scenario['action_history'])} moves")
-        print(f"   Result: Hero {'WON' if payoff_result['hero_won'] else 'LOST'} (+{payoff_result['hero_payoff']:.2f})")
-        print(f"   3-bet: {'Yes' if natural_scenario['is_3bet'] else 'No'}")
-        print(f"   Showdown: {'Yes' if natural_scenario['showdown'] else 'No'}")
+        if natural_scenario is not None:
+            print(f"   Cards: {natural_scenario['hero_cards']} vs {natural_scenario['villain_cards']}")
+            print(f"   Scenario: {natural_scenario['scenario_key']}")
+            print(f"   Actions: {len(natural_scenario['action_history'])} moves")
+            print(f"   Result: Hero {'WON' if payoff_result['hero_won'] else 'LOST'} (+{payoff_result['hero_payoff']:.2f})")
+            print(f"   3-bet: {'Yes' if natural_scenario['is_3bet'] else 'No'}")
+            print(f"   Showdown: {'Yes' if natural_scenario['showdown'] else 'No'}")
+        else:
+            print(f"   ❌ Scenario filtered (unrealistic combination)")
+            print(f"   Cards: {game_state['hero_cards_str']} vs {game_state['villain_cards_str']}")
+            print(f"   Actions: {len(game_state['action_history'])} moves")
+            print(f"   Result: Hero {'WON' if payoff_result['hero_won'] else 'LOST'} (+{payoff_result['hero_payoff']:.2f})")
     
     return trainer
 
