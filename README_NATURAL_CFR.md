@@ -8,11 +8,15 @@ Instead of training on pre-defined scenarios, this system generates natural poke
 
 ## 🚀 Key Features
 
+## 🚀 Key Features
+
 ### Natural Monte Carlo Simulation
 - Deals random cards to both players
-- Randomizes position, stack sizes, blinds, and game conditions
+- Randomizes specific stack sizes (500, 1000, 5000 BBs) - both players start with equal stacks
+- Randomizes specific blind levels (2, 5, 10, 25, 50 BB) to simulate different tournament stages
 - Both players act using their learned strategies (no hardcoded behavior)
 - Multi-step betting sequences with proper game tree handling
+- Preflop-only play (extendable to postflop)
 
 ### Co-evolving Strategies
 - Hero and villain maintain separate strategy databases
@@ -27,10 +31,12 @@ Instead of training on pre-defined scenarios, this system generates natural poke
 
 ### Natural Scenario Recording
 - Records scenarios that emerge naturally from gameplay:
-  - Hand category, position, stack depth, blinds level
-  - Villain stack category, opponent actions, 3-bet indicators
+  - Hand category (grouped: 'trash', 'premium_pairs', etc.)
+  - Specific stack size (500, 1000, 5000 BBs) - both players equal
+  - Specific blind size (2, 5, 10, 25, 50 BB)
+  - Position, opponent actions, 3-bet indicators
   - Full action history and payoffs
-- No forced scenario lists - everything emerges organically
+- No forced scenario lists - everything emerges organically from natural gameplay
 
 ## 📁 Files
 
@@ -96,12 +102,12 @@ The system tracks strategy development for both players:
 
 **Hero Strategies (sample):**
 ```
-trash|BTN|deep|low:
+trash|BTN|1000|10:
   fold: 70.4%
   call_small: 21.3% 
   raise_small: 8.3%
 
-premium_pairs|BB|short|high:
+premium_pairs|BB|500|50:
   call_small: 15.2%
   raise_mid: 42.1%
   raise_high: 42.7%
@@ -109,7 +115,7 @@ premium_pairs|BB|short|high:
 
 **Villain Strategies (sample):**
 ```
-medium_aces|BTN|medium|medium:
+medium_aces|BTN|5000|25:
   fold: 25.1%
   call_small: 38.4%
   raise_small: 36.5%
@@ -140,25 +146,50 @@ Tests include:
 
 ## 📋 Output Files
 
-The system generates several output files:
+The system generates several output files with the new specific value format:
 
-- **`natural_scenarios_TIMESTAMP.csv`** - All natural scenarios recorded
-- **`hero_natural_strategies_TIMESTAMP.csv`** - Hero's learned strategies
-- **`villain_natural_strategies_TIMESTAMP.csv`** - Villain's learned strategies  
+- **`natural_scenarios_TIMESTAMP.csv`** - All natural scenarios recorded with specific stack/blind values
+- **`hero_natural_strategies_TIMESTAMP.csv`** - Hero's learned strategies  
+- **`villain_natural_strategies_TIMESTAMP.csv`** - Villain's learned strategies
+- **`final_lookup_table_TIMESTAMP.csv`** - **Single lookup table with all scenario strategies** (primary output)
 - **`natural_cfr_final_TIMESTAMP.pkl`** - Complete training state for resuming
+
+### New Output Format
+
+The lookup table now uses **specific values** instead of categories:
+
+**Scenario Key Format:** `hand_category|position|stack_size|blind_size`
+- Example: `trash|BTN|1000|10` instead of `trash|BTN|very_deep|medium`
+
+**CSV Columns Include:**
+- `scenario_key`: Unique scenario identifier with specific values
+- `hand_category`: Grouped hand types (trash, premium_pairs, etc.)
+- `position`: BTN or BB
+- `stack_size`: Specific stack size (500, 1000, 5000) 
+- `blind_size`: Specific blind size (2, 5, 10, 25, 50)
+- `stack_depth`/`blinds_level`: Legacy categories for backward compatibility
+- `best_action`: Learned optimal action
+- `confidence`: Strategy confidence level
+- `estimated_ev`: Expected value from scenarios
+- `player`: HERO or VILLAIN
+- Action probabilities: `fold_pct`, `raise_small_pct`, etc.
 
 ## 🔬 Technical Details
 
 ### Game Flow
 1. Deal random hole cards to both players
-2. Assign random positions, stack sizes, blinds level
-3. Players act using their current learned strategies
-4. Record the natural scenario that emerges
-5. Calculate payoffs and update both players' strategies via CFR
-6. Repeat for thousands of iterations
+2. Assign random positions (BTN/BB)
+3. Set equal stack sizes for both players from [500, 1000, 5000] BBs
+4. Set random blind level from [2, 5, 10, 25, 50] BB
+5. Players act using their current learned strategies (preflop only)
+6. Reveal community cards and determine winner after betting complete
+7. Record the natural scenario that emerges with specific values
+8. Calculate payoffs and update both players' strategies via CFR
+9. Repeat for thousands of iterations
 
 ### Strategy Storage
-- Scenarios keyed by: `hand_category|position|stack_category|blinds_level`
+- Scenarios keyed by: `hand_category|position|stack_size|blind_size`
+- Examples: `premium_pairs|BTN|1000|10`, `trash|BB|500|50`
 - Separate regret and strategy tracking for hero and villain
 - Action probabilities normalized from accumulated strategy sums
 
