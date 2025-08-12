@@ -46,7 +46,13 @@ PREFLOP_HAND_RANGES = {
     "trash": ["72o", "83o", "94o", "T2o", "J3o", "Q4o", "K2o"]
 }
 
-# STACK SIZE CATEGORIES (in big blinds)
+# STACK SIZES (in big blinds) - Updated for Monte Carlo simulation
+STACK_SIZES = [500, 1000, 5000]  # Specific stack sizes for simulation
+
+# BLIND SIZES (big blind values) - Updated for Monte Carlo simulation  
+BLIND_SIZES = [2, 5, 10, 25, 50]  # Specific blind levels for simulation
+
+# Legacy stack categories for backward compatibility (deprecated)
 STACK_CATEGORIES = {
     "ultra_short": (8, 12),    # Desperate territory
     "short": (13, 20),         # Push/fold mode

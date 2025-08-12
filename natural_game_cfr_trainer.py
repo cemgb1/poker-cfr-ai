@@ -39,7 +39,7 @@ Classes:
 
 from enhanced_cfr_trainer_v2 import EnhancedCFRTrainer
 from enhanced_cfr_preflop_generator_v2 import (
-    PREFLOP_HAND_RANGES, STACK_CATEGORIES, ACTIONS,
+    PREFLOP_HAND_RANGES, STACK_CATEGORIES, STACK_SIZES, BLIND_SIZES, ACTIONS,
     cards_to_str, simulate_enhanced_showdown
 )
 from treys import Card, Deck, Evaluator
@@ -192,6 +192,23 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         else:
             return "medium"
     
+    def classify_blind_level(self, blind_size):
+        """
+        Classify blind size into level category (for backward compatibility).
+        
+        Args:
+            blind_size: Big blind size
+            
+        Returns:
+            str: Blind level category (low, medium, high)
+        """
+        if blind_size <= 5:
+            return "low"
+        elif blind_size <= 25:
+            return "medium"
+        else:
+            return "high"
+    
     def generate_random_game_state(self):
         """
         Generate a random game state for natural Monte Carlo simulation.
@@ -208,12 +225,15 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         hero_position = random.choice(["BTN", "BB"])
         villain_position = "BB" if hero_position == "BTN" else "BTN"
         
-        # Random stack sizes (can be different for hero and villain)
-        hero_stack_bb = random.randint(8, 200)
-        villain_stack_bb = random.randint(8, 200)
+        # Random stack sizes - both players start with equal stacks
+        stack_size_bb = random.choice(STACK_SIZES)
+        hero_stack_bb = stack_size_bb
+        villain_stack_bb = stack_size_bb
         
-        # Random blinds level
-        blinds_level = random.choice(["low", "medium", "high"])
+        # Random blind size
+        blind_size = random.choice(BLIND_SIZES)
+        small_blind = blind_size / 2
+        big_blind = blind_size
         
         # Classify hands and stacks
         hero_hand_category = self.classify_hand_category(hero_cards)
@@ -234,8 +254,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'villain_hand_category': villain_hand_category,
             'hero_stack_category': hero_stack_category,
             'villain_stack_category': villain_stack_category,
-            'blinds_level': blinds_level,
-            'pot_bb': 1.5,  # Small blind + big blind
+            'stack_size': stack_size_bb,  # New: explicit stack size
+            'blind_size': blind_size,     # New: explicit blind size
+            'small_blind': small_blind,   # New: small blind amount
+            'big_blind': big_blind,       # New: big blind amount
+            'blinds_level': self.classify_blind_level(blind_size),  # Backward compatibility
+            'pot_bb': small_blind + big_blind,  # Updated: actual pot size
             'to_act': hero_position,  # BTN acts first preflop
             'action_history': [],
             'is_3bet': False,
@@ -305,15 +329,15 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         if is_hero:
             hand_category = game_state['hero_hand_category']
             position = game_state['hero_position']
-            stack_category = game_state['hero_stack_category']
+            stack_size = game_state['stack_size']  # Use specific stack size
         else:
             hand_category = game_state['villain_hand_category']
             position = game_state['villain_position']
-            stack_category = game_state['villain_stack_category']
+            stack_size = game_state['stack_size']  # Use specific stack size
         
-        blinds_level = game_state['blinds_level']
+        blind_size = game_state['blind_size']  # Use specific blind size
         
-        return f"{hand_category}|{position}|{stack_category}|{blinds_level}"
+        return f"{hand_category}|{position}|{stack_size}|{blind_size}"
     
     def should_explore(self, scenario_key, action, is_hero=True):
         """
@@ -688,8 +712,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         natural_scenario = {
             'hand_category': game_state['hero_hand_category'],
             'position': game_state['hero_position'],
-            'stack_depth': game_state['hero_stack_category'],
-            'blinds_level': game_state['blinds_level'],
+            'stack_depth': game_state['hero_stack_category'],  # Backward compatibility
+            'stack_size': game_state['stack_size'],            # New: specific stack size
+            'blinds_level': game_state['blinds_level'],        # Backward compatibility
+            'blind_size': game_state['blind_size'],            # New: specific blind size
             'villain_stack_category': game_state['villain_stack_category'],
             'opponent_action': opponent_action,
             'is_3bet': game_state['is_3bet'],
@@ -1150,7 +1176,21 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                     if sum(strategy_counts.values()) > 0:
                         parts = scenario_key.split("|")
                         if len(parts) >= 4:
-                            hand_category, position, stack_category, blinds_level = parts[:4]
+                            hand_category, position, stack_info, blind_info = parts[:4]
+                            
+                            # Determine if this is old format (categories) or new format (specific values)
+                            try:
+                                stack_size = int(stack_info)
+                                blind_size = int(blind_info)
+                                # New format with specific values
+                                stack_category = self.classify_stack_category(stack_size)
+                                blinds_level = self.classify_blind_level(blind_size)
+                            except ValueError:
+                                # Old format with categories
+                                stack_category = stack_info
+                                blinds_level = blind_info
+                                stack_size = None
+                                blind_size = None
                         else:
                             continue
                         
@@ -1169,7 +1209,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                             'hand_category': hand_category,
                             'position': position,
                             'stack_depth': stack_category,
+                            'stack_size': stack_size,  # New field
                             'blinds_level': blinds_level,
+                            'blind_size': blind_size,  # New field
                             'training_games': self.natural_scenario_counter.get(scenario_key, 0),
                             'best_action': best_action.upper(),
                             'confidence': round(confidence, 3),
@@ -1405,7 +1447,21 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 if sum(strategy_counts.values()) > 0:
                     parts = scenario_key.split("|")
                     if len(parts) >= 4:
-                        hand_category, position, stack_category, blinds_level = parts[:4]
+                        hand_category, position, stack_info, blind_info = parts[:4]
+                        
+                        # Determine if this is old format (categories) or new format (specific values)
+                        try:
+                            stack_size = int(stack_info)
+                            blind_size = int(blind_info)
+                            # New format with specific values
+                            stack_category = self.classify_stack_category(stack_size)
+                            blinds_level = self.classify_blind_level(blind_size)
+                        except ValueError:
+                            # Old format with categories
+                            stack_category = stack_info
+                            blinds_level = blind_info
+                            stack_size = None
+                            blind_size = None
                     else:
                         continue
                     
@@ -1446,7 +1502,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                         'hand_category': hand_category,
                         'position': position,
                         'stack_depth': stack_category,
+                        'stack_size': stack_size,  # New field
                         'blinds_level': blinds_level,
+                        'blind_size': blind_size,  # New field
                         'training_games': training_games,
                         'total_visits': total_visits,
                         'estimated_ev': round(estimated_ev, 3),
@@ -1463,7 +1521,21 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 if sum(strategy_counts.values()) > 0:
                     parts = scenario_key.split("|")
                     if len(parts) >= 4:
-                        hand_category, position, stack_category, blinds_level = parts[:4]
+                        hand_category, position, stack_info, blind_info = parts[:4]
+                        
+                        # Determine if this is old format (categories) or new format (specific values)
+                        try:
+                            stack_size = int(stack_info)
+                            blind_size = int(blind_info)
+                            # New format with specific values
+                            stack_category = self.classify_stack_category(stack_size)
+                            blinds_level = self.classify_blind_level(blind_size)
+                        except ValueError:
+                            # Old format with categories
+                            stack_category = stack_info
+                            blinds_level = blind_info
+                            stack_size = None
+                            blind_size = None
                     else:
                         continue
                     
@@ -1505,7 +1577,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                         'hand_category': hand_category,
                         'position': position,
                         'stack_depth': stack_category,
+                        'stack_size': stack_size,  # New field
                         'blinds_level': blinds_level,
+                        'blind_size': blind_size,  # New field
                         'training_games': training_games,
                         'total_visits': total_visits,
                         'estimated_ev': round(estimated_ev, 3),
