@@ -33,6 +33,13 @@ instead of pre-defined scenarios. Key features:
    - Tracks opponent_action, is_3bet, full action history, and payoffs
    - All scenarios emerge naturally from gameplay
 
+6. NEW: Unified Scenario Lookup Table:
+   - Real-time CSV export (scenario_lookup_table.csv) at every log interval
+   - Provides live monitoring of learning progress and scenario coverage
+   - Same format as GCP trainer for consistency
+
+7. Default tournament penalty: 0.2 (encourages moderate risk-taking)
+
 Classes:
 - NaturalGameCFRTrainer: Main trainer implementing natural Monte Carlo CFR
 """
@@ -66,7 +73,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     """
     
     def __init__(self, enable_pruning=True, regret_pruning_threshold=-300.0,
-                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.6,
+                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.2,
                  epsilon_exploration=0.1, min_visit_threshold=5, logger=None):
         """
         Initialize Natural Game CFR Trainer.
@@ -1105,6 +1112,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Update metrics
         self.natural_metrics['hero_win_rate'] = hero_win_rate
         self.natural_metrics['avg_pot_size'] = avg_pot_size
+        
+        # Export unified scenario lookup table for live monitoring
+        try:
+            self.export_unified_scenario_lookup_csv("scenario_lookup_table.csv")
+        except Exception as export_error:
+            self.logger.warning(f"⚠️ Scenario lookup table export failed: {export_error}")
     
     def save_training_state(self, filename):
         """
@@ -1711,6 +1724,138 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             log_exception(self.logger, "Failed to create final lookup table")
             print(f"❌ Failed to create lookup table: {e}")
             return None
+    
+    def export_unified_scenario_lookup_csv(self, filename="scenario_lookup_table.csv"):
+        """
+        Export unified scenario lookup table with aggregated data from natural game simulation.
+        This provides the same format as the GCP trainer for consistency.
+        
+        CSV contains:
+        - scenario_key: Unique identifier combining all scenario metrics
+        - hand_category: Type of poker hand (premium_pairs, medium_aces, etc.)
+        - stack_category: Stack depth category (ultra_short, short, medium, deep, very_deep)
+        - blinds_level: Blinds level (low, medium, high)
+        - position: Player position (BTN, BB)
+        - opponent_action: Current opponent context (for natural games, shows mixed)
+        - iterations_completed: Number of games played for this scenario
+        - total_rollouts: Total rollouts performed (same as games for natural CFR)
+        - regret: Current average regret for this scenario
+        - average_strategy: Primary learned strategy (FOLD/CALL/RAISE group)
+        - strategy_confidence: Confidence percentage for the primary strategy
+        """
+        self.logger.info(f"📊 Exporting unified scenario lookup table to {filename}...")
+        
+        export_data = []
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Get all unique scenarios that have been encountered (hero strategies)
+        all_scenario_keys = set()
+        all_scenario_keys.update(self.strategy_sum.keys())
+        all_scenario_keys.update(self.natural_scenario_counter.keys())
+        
+        for scenario_key in all_scenario_keys:
+            # Parse scenario key: hand_category|position|stack_category|blinds_level
+            parts = scenario_key.split("|")
+            if len(parts) >= 4:
+                hand_category = parts[0]
+                position = parts[1] 
+                stack_category = parts[2]
+                blinds_level = parts[3]
+            else:
+                continue
+            
+            # Get training statistics
+            iterations_completed = self.natural_scenario_counter.get(scenario_key, 0)
+            total_rollouts = iterations_completed  # Same as games for natural CFR
+            
+            # Calculate average regret
+            average_regret = 0.0
+            if scenario_key in self.regret_sum:
+                regret_values = list(self.regret_sum[scenario_key].values())
+                if regret_values:
+                    average_regret = sum(regret_values) / len(regret_values)
+            
+            # Calculate strategy information
+            average_strategy = "UNKNOWN"
+            strategy_confidence = 0.0
+            opponent_action = "mixed"  # For natural games, we aggregate across different opponent contexts
+            
+            if scenario_key in self.strategy_sum:
+                strategy_counts = self.strategy_sum[scenario_key]
+                if sum(strategy_counts.values()) > 0:
+                    total_count = sum(strategy_counts.values())
+                    
+                    # Group actions (same logic as GCP trainer)
+                    fold_total = strategy_counts.get('fold', 0.0)
+                    call_total = (strategy_counts.get('call_small', 0.0) + 
+                                 strategy_counts.get('call_mid', 0.0) + 
+                                 strategy_counts.get('call_high', 0.0))
+                    raise_total = (strategy_counts.get('raise_small', 0.0) + 
+                                  strategy_counts.get('raise_mid', 0.0) + 
+                                  strategy_counts.get('raise_high', 0.0))
+                    
+                    # Determine primary strategy
+                    group_totals = {
+                        'FOLD': (fold_total / total_count) * 100,
+                        'CALL': (call_total / total_count) * 100,
+                        'RAISE': (raise_total / total_count) * 100
+                    }
+                    
+                    if group_totals:
+                        average_strategy = max(group_totals.items(), key=lambda x: x[1])[0]
+                        strategy_confidence = max(group_totals.values())
+            
+            # Build unified lookup table row
+            row = {
+                'scenario_key': scenario_key,
+                'hand_category': hand_category,
+                'stack_category': stack_category,
+                'blinds_level': blinds_level,
+                'position': position,
+                'opponent_action': opponent_action,
+                'iterations_completed': iterations_completed,
+                'total_rollouts': total_rollouts,
+                'regret': round(average_regret, 6),
+                'average_strategy': average_strategy,
+                'strategy_confidence': round(strategy_confidence, 2),
+                'last_updated': current_time
+            }
+            
+            export_data.append(row)
+        
+        if export_data:
+            df = pd.DataFrame(export_data)
+            
+            # Sort by iterations_completed descending, then by strategy_confidence
+            df = df.sort_values(['iterations_completed', 'strategy_confidence'], ascending=[False, False])
+            
+            # Export to CSV, replacing previous version
+            df.to_csv(filename, index=False)
+            
+            self.logger.info(f"✅ Exported unified scenario lookup table: {len(export_data)} scenarios")
+            self.logger.info(f"   📊 Total games across all scenarios: {df['iterations_completed'].sum():,}")
+            self.logger.info(f"   🎯 Average games per scenario: {df['iterations_completed'].mean():.1f}")
+            self.logger.info(f"   📈 Scenarios with >10 games: {len(df[df['iterations_completed'] > 10])}")
+            
+            # Show strategy distribution
+            if len(df) > 0:
+                strategy_dist = df['average_strategy'].value_counts()
+                self.logger.info(f"   🎯 Strategy Distribution:")
+                for strategy, count in strategy_dist.items():
+                    pct = count/len(export_data)*100 if len(export_data) > 0 else 0
+                    self.logger.info(f"      {strategy}: {count} scenarios ({pct:.1f}%)")
+            
+            return df
+        else:
+            self.logger.info("📊 No scenario data available yet for lookup table export")
+            # Create empty CSV with headers for consistency
+            empty_df = pd.DataFrame(columns=[
+                'scenario_key', 'hand_category', 'stack_category', 'blinds_level', 
+                'position', 'opponent_action', 'iterations_completed', 'total_rollouts', 
+                'regret', 'average_strategy', 'strategy_confidence', 'last_updated'
+            ])
+            empty_df.to_csv(filename, index=False)
+            return empty_df
     
     def archive_old_files(self):
         """

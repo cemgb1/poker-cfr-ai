@@ -8,6 +8,7 @@ This module provides advanced CFR training capabilities including:
 2. Sequential scenario training with multiple rollouts per visit
 3. Configurable stopping conditions and convergence checking
 4. Comprehensive performance tracking and statistics
+5. NEW: Unified scenario lookup table export for real-time monitoring
 
 Key Features:
 - Scenario keys: hand_category|position|stack_category|blinds_level (no bet_size_category)
@@ -17,6 +18,7 @@ Key Features:
 - Balanced sampling: Ensures proportional coverage across hand categories
 - Sequential training: Process scenarios in order with multiple rollouts per visit
 - Advanced stopping conditions: Minimum rollouts requirement + regret stabilization
+- Default tournament penalty: 0.2 (encourages moderate risk-taking)
 
 Training Process (Enhanced CFR):
 1. Select scenario from deterministic set of 330 combinations
@@ -61,7 +63,7 @@ class EnhancedCFRTrainer:
     """
     
     def __init__(self, scenarios=None, enable_pruning=True, regret_pruning_threshold=-300.0, 
-                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.6):
+                 strategy_pruning_threshold=0.001, tournament_survival_penalty=0.2):
         """
         Initialize Enhanced CFR Trainer with optional pruning capabilities and tournament logic.
         
@@ -70,9 +72,10 @@ class EnhancedCFRTrainer:
             enable_pruning: Enable all pruning techniques (default True)
             regret_pruning_threshold: Threshold for regret-based pruning (default -300.0)
             strategy_pruning_threshold: Threshold for strategy pruning (default 0.001)
-            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.6)
+            tournament_survival_penalty: Factor to scale tournament bust penalties (default 0.2)
                                        Lower values = less punishing, encourage more risk-taking
-                                       0.6 = 40% less punishing than original harsh penalties
+                                       0.2 = moderate risk-taking (new default)
+                                       0.6 = more conservative 
                                        1.0 = original harsh penalties (fold-heavy strategy)
                                        0.3 = very aggressive, high risk-taking
                                        Range: 0.1 to 2.0 recommended
@@ -127,7 +130,7 @@ class EnhancedCFRTrainer:
         print(f"🏆 Enhanced CFR Trainer Initialized!")
         print(f"📊 Training scenarios: {len(self.scenarios):,}")
         print(f"📈 Hand categories: {len(self.scenarios_by_category)} balanced groups")
-        print(f"🎯 Tournament survival penalty: {self.tournament_survival_penalty:.1f} (lower = less punishing, more risk-taking)")
+        print(f"🎯 Tournament survival penalty: {self.tournament_survival_penalty:.1f} (lower = less punishing, more risk-taking, default = 0.2)")
         if self.enable_pruning:
             print(f"✂️ Pruning enabled: regret_threshold={self.regret_pruning_threshold}, strategy_threshold={self.strategy_pruning_threshold}")
 
