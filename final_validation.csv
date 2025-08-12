@@ -1,0 +1,4 @@
+scenario_key,hand_category,stack_category,blinds_level,position,opponent_action,iterations_completed,total_rollouts,regret,average_strategy,strategy_confidence,fold_pct,call_pct,raise_small_pct,raise_mid_pct,raise_high_pct,is_3bet,last_updated
+premium_pairs|BB|medium|low,premium_pairs,medium,low,BB,mixed,200,200,0.0,RAISE,80.0,5.0,15.0,10.0,40.0,30.0,1,2025-08-12 16:22:39
+medium_aces|BTN|short|high,medium_aces,short,high,BTN,mixed,150,150,0.0,CALL,66.67,13.33,66.67,20.0,0.0,0.0,0,2025-08-12 16:22:39
+trash|BB|ultra_short|medium,trash,ultra_short,medium,BB,mixed,50,50,0.0,FOLD,90.0,90.0,10.0,0.0,0.0,0.0,0,2025-08-12 16:22:39
