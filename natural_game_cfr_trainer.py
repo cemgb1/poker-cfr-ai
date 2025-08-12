@@ -295,33 +295,38 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         # If no previous action, can check or bet
         if not action_history:
-            # First to act can check or bet
-            actions = ['fold', 'call_small', 'raise_small', 'raise_mid', 'raise_high']
+            # First to act can check or bet - using universal action set
+            actions = ['fold', 'check', 'call_low', 'raise_low', 'raise_mid', 'raise_high']
             
             # Filter by stack size
             if stack_bb <= 15:
-                actions = ['fold', 'call_small', 'raise_small']  # Short stack options
+                actions = ['fold', 'check', 'call_low', 'raise_low', 'shove']  # Short stack options
             elif stack_bb <= 30:
-                actions = ['fold', 'call_small', 'raise_small', 'raise_mid']
+                actions = ['fold', 'check', 'call_low', 'raise_low', 'raise_mid']
             
             return actions
         
         # If there was a previous action, respond accordingly
         last_action = action_history[-1]['action']
         
-        if last_action in ['call_small', 'call_mid', 'call_high']:
+        if last_action in ['call_low', 'call_mid', 'call_high', 'check']:
             # Can check, bet, or fold
-            actions = ['fold', 'call_small', 'raise_small', 'raise_mid', 'raise_high']
-        elif last_action in ['raise_small', 'raise_mid', 'raise_high']:
+            actions = ['fold', 'check', 'call_low', 'raise_low', 'raise_mid', 'raise_high']
+        elif last_action in ['raise_low', 'raise_mid', 'raise_high']:
             # Facing a raise - can call, re-raise, or fold
-            actions = ['fold', 'call_small', 'call_mid', 'call_high', 'raise_small', 'raise_mid', 'raise_high']
+            actions = ['fold', 'call_low', 'call_mid', 'call_high', 'raise_low', 'raise_mid', 'raise_high']
         else:
             # Default action set
-            actions = ['fold', 'call_small', 'call_mid', 'call_high', 'raise_small', 'raise_mid', 'raise_high']
+            actions = ['fold', 'check', 'call_low', 'call_mid', 'call_high', 'raise_low', 'raise_mid', 'raise_high']
+        
+        # Add shove option for short stacks
+        if stack_bb <= 20:
+            if 'shove' not in actions:
+                actions.append('shove')
         
         # Filter by stack size for short stacks
         if stack_bb <= 15:
-            actions = [a for a in actions if a in ['fold', 'call_small', 'raise_small']]
+            actions = [a for a in actions if a in ['fold', 'check', 'call_low', 'raise_low', 'shove']]
         elif stack_bb <= 30:
             actions = [a for a in actions if a not in ['call_high', 'raise_high']]
         
@@ -329,27 +334,65 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def get_scenario_key_from_game_state(self, game_state, is_hero=True):
         """
-        Generate scenario key from current game state.
+        Generate enhanced scenario key from current game state.
+        
+        Updated to 7-column format: hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet
         
         Args:
             game_state: Current game state
             is_hero: Whether key is for hero (True) or villain (False)
             
         Returns:
-            str: Scenario key for strategy lookup
+            str: Enhanced scenario key for strategy lookup
         """
         if is_hero:
             hand_category = game_state['hero_hand_category']
             position = game_state['hero_position']
             stack_category = game_state['hero_stack_category']
+            villain_stack_category = game_state['villain_stack_category']
         else:
             hand_category = game_state['villain_hand_category']
             position = game_state['villain_position']
             stack_category = game_state['villain_stack_category']
+            villain_stack_category = game_state['hero_stack_category']  # Villain's perspective
         
         blinds_level = game_state['blinds_level']
         
-        return f"{hand_category}|{position}|{stack_category}|{blinds_level}"
+        # Determine opponent action from action history
+        action_history = game_state.get('action_history', [])
+        opponent_action = self._get_last_opponent_action(action_history, is_hero)
+        
+        # Get 3-bet status
+        is_3bet = game_state.get('is_3bet', False)
+        
+        # Convert to standardized format
+        opponent_action_str = str(opponent_action) if opponent_action else 'none'
+        is_3bet_str = 'True' if is_3bet else 'False'
+        
+        return f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{opponent_action_str}|{is_3bet_str}"
+    
+    def _get_last_opponent_action(self, action_history, is_hero):
+        """
+        Extract the last opponent action from action history.
+        
+        Args:
+            action_history: List of action dictionaries
+            is_hero: Whether we're looking from hero's perspective
+            
+        Returns:
+            str: Last opponent action or None if no opponent action
+        """
+        if not action_history:
+            return 'none'
+        
+        # Look through history backwards for last opponent action
+        for action_record in reversed(action_history):
+            # If we're hero, look for villain actions (is_hero=False)
+            # If we're villain, look for hero actions (is_hero=True)
+            if action_record.get('is_hero') != is_hero:
+                return action_record.get('action', 'none')
+        
+        return 'none'
     
     def should_explore(self, scenario_key, action, is_hero=True):
         """
@@ -537,6 +580,23 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'exploration_used': exploration_used
         }
     
+    def monte_carlo_game_simulation(self, hero_stack_bb=None, villain_stack_bb=None, blinds_level=None):
+        """
+        Perform a single Monte Carlo game simulation.
+        
+        This method is an alias for simulate_single_hand to maintain compatibility
+        with existing test suites while providing a clear interface for Monte Carlo simulation.
+        
+        Args:
+            hero_stack_bb: Hero's current stack size (if None, randomized)
+            villain_stack_bb: Villain's current stack size (if None, randomized) 
+            blinds_level: Current blinds level (if None, randomized)
+        
+        Returns:
+            dict: Complete simulation result with game_state, natural_scenario, payoff_result
+        """
+        return self.simulate_single_hand(hero_stack_bb, villain_stack_bb, blinds_level)
+    
     def simulate_full_game(self):
         """
         Simulate a complete poker game consisting of multiple hands with fixed parameters.
@@ -649,7 +709,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         if action == 'fold':
             game_state['folded'] = True
             game_state['folder'] = 'hero' if is_hero else 'villain'
-        elif action in ['call_small', 'call_mid', 'call_high']:
+        elif action == 'check':
+            # Check - no additional bet
+            pass
+        elif action in ['call_low', 'call_mid', 'call_high']:
             # Add call amount to pot (simplified)
             call_amount = min(stack_bb * 0.1, stack_bb)  # Call sizing logic
             game_state['pot_bb'] += call_amount
@@ -657,9 +720,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 game_state['hero_stack_bb'] -= call_amount
             else:
                 game_state['villain_stack_bb'] -= call_amount
-        elif action in ['raise_small', 'raise_mid', 'raise_high']:
+        elif action in ['raise_low', 'raise_mid', 'raise_high']:
             # Add raise amount to pot
-            if action == 'raise_small':
+            if action == 'raise_low':
                 raise_amount = min(game_state['pot_bb'] * 2.5, stack_bb)
             elif action == 'raise_mid':
                 raise_amount = min(game_state['pot_bb'] * 3.0, stack_bb)
@@ -677,6 +740,14 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                             if 'raise' in a['action'])
             if raise_count >= 2:
                 game_state['is_3bet'] = True
+        elif action == 'shove':
+            # All-in
+            all_in_amount = stack_bb
+            game_state['pot_bb'] += all_in_amount
+            if is_hero:
+                game_state['hero_stack_bb'] = 0
+            else:
+                game_state['villain_stack_bb'] = 0
     
     def is_betting_complete(self, game_state):
         """

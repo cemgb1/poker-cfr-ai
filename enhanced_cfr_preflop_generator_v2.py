@@ -60,15 +60,17 @@ STACK_CATEGORIES = {
 # TOURNAMENT STAGES
 TOURNAMENT_STAGES = ["early", "middle", "late", "bubble"]
 
-# ENHANCED ACTION SET - Updated to match specification
+# UNIVERSAL ACTION SET - Updated for enhanced CFR requirements
 ACTIONS = {
     "fold": 0,
-    "call_small": 1,    # Call ≤15% of stack  
-    "call_mid": 2,      # Call 15-30% of stack
-    "call_high": 3,     # Call >30% of stack
-    "raise_small": 4,   # Raise 2-2.5x
-    "raise_mid": 5,     # Raise 2.5-3x  
-    "raise_high": 6     # Raise 3x+ or all-in
+    "check": 1,         # Check (no additional bet)
+    "call_low": 2,      # Call ≤15% of stack  
+    "call_mid": 3,      # Call 15-30% of stack
+    "call_high": 4,     # Call >30% of stack
+    "raise_low": 5,     # Raise 2-2.5x
+    "raise_mid": 6,     # Raise 2.5-3x  
+    "raise_high": 7,    # Raise 3x+ 
+    "shove": 8          # All-in
 }
 
 def generate_enhanced_scenarios():
