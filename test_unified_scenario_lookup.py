@@ -45,7 +45,8 @@ def test_unified_scenario_lookup_csv_structure():
     required_columns = [
         'scenario_key', 'hand_category', 'stack_category', 'blinds_level', 
         'position', 'opponent_action', 'iterations_completed', 'total_rollouts', 
-        'regret', 'average_strategy', 'strategy_confidence', 'last_updated'
+        'regret', 'average_strategy', 'strategy_confidence', 'fold_pct', 'call_pct',
+        'raise_small_pct', 'raise_mid_pct', 'raise_high_pct', 'is_3bet', 'last_updated'
     ]
     
     print(f"📋 CSV columns: {list(df.columns)}")
