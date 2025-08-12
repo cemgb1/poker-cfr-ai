@@ -247,3 +247,11 @@ performance/natural_cfr_performance_*.csv
 # Checkpoint files (all except example/template ones)
 checkpoints/natural_cfr_*.pkl
 checkpoints/worker_*.pkl
+
+# Simplified CFR output files - exclude temporary training outputs
+simplified_cfr_scenarios_*.csv
+simplified_cfr_hero_strategies_*.csv
+simplified_cfr_villain_strategies_*.csv
+simplified_cfr_coverage_*.json
+checkpoints/simplified_cfr_*.pkl
+checkpoints/test_checkpoint.pkl
