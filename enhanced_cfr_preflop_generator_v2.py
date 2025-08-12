@@ -26,7 +26,9 @@ Action mapping depends on bet size as % of stack:
 - call_high: >30% of stack
 """
 
-from treys import Card, Deck, Evaluator
+from treys.card import Card
+from treys.deck import Deck
+from treys.evaluator import Evaluator
 import random
 from collections import Counter
 import numpy as np
