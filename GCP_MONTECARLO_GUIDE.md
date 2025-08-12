@@ -4,16 +4,22 @@ This guide explains how to run the multi-core Monte Carlo Natural CFR trainer on
 
 ## Overview
 
-The Natural CFR training system now supports multi-core parallel processing, allowing you to distribute training across multiple CPU cores for faster convergence. Each worker processes an equal share of games independently and saves its own results.
+The Natural CFR training system uses a game-based simulation structure where each "game" consists of multiple poker hands played with fixed stack and blind sizes until one player is busted. The system supports multi-core parallel processing, allowing you to distribute training across multiple CPU cores for faster convergence. Each worker processes an equal share of games independently and saves its own results.
+
+### Key Concepts:
+- **Games**: Complete poker sessions from equal stacks to bust (primary simulation unit)
+- **Hands**: Individual poker hands within a game (preflop-only currently)  
+- **Fixed Parameters**: Stack size and blinds remain constant within each game
+- **Variable Elements**: Cards and positions randomized per hand within game
 
 ## Quick Start
 
 ### Basic Multi-Core Training
 ```bash
-# Run 50,000 games across 8 workers (default)
+# Run 50,000 games across 8 workers (default) - each game plays multiple hands until bust
 python run_natural_cfr_training.py --games 50000
 
-# Run with custom worker count
+# Run with custom worker count - distributes games across workers
 python run_natural_cfr_training.py --games 100000 --workers 16
 
 # Single-process mode (backward compatible)

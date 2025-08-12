@@ -363,7 +363,7 @@ def run_natural_cfr_training(args):
         print("🚀 Natural Game CFR Training System")
         print("=" * 60)
         print(f"🎲 Training mode: {args.mode}")
-        print(f"🎯 Games to simulate: {args.games:,}")
+        print(f"🎯 Games to simulate: {args.games:,} (each game = multiple hands until bust)")
         print(f"🔍 Epsilon exploration: {args.epsilon}")
         print(f"📊 Min visit threshold: {args.min_visits}")
         print(f"🏆 Tournament penalty: {args.tournament_penalty}")
@@ -758,16 +758,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run 10,000 game training session (single-process)
+  # Run 10,000 games training session (single-process) - each game plays multiple hands until bust
   python run_natural_cfr_training.py --games 10000 --workers 1
   
-  # Run multi-core training with 4 workers
+  # Run multi-core training with 4 workers - distributes games across workers
   python run_natural_cfr_training.py --games 20000 --workers 4
   
   # Auto-resume from latest checkpoint with 8 workers (default)
   python run_natural_cfr_training.py --games 50000
   
-  # Quick demo with high exploration
+  # Quick demo with high exploration - plays 1000 complete games
   python run_natural_cfr_training.py --mode demo --games 1000
   
   # Resume from specific checkpoint
@@ -778,6 +778,9 @@ Examples:
   
   # Custom parameters with multi-core
   python run_natural_cfr_training.py --games 20000 --epsilon 0.05 --tournament-penalty 0.4 --workers 6
+
+Note: The --games parameter now specifies the number of complete poker games to simulate.
+Each game consists of multiple hands played with fixed stack and blind sizes until one player is busted.
         """
     )
     
@@ -787,7 +790,7 @@ Examples:
     
     # Training parameters
     parser.add_argument('--games', type=int, default=10000,
-                       help='Number of games to simulate (default: 10000)')
+                       help='Number of games to simulate (each game consists of multiple hands until one player is busted) (default: 10000)')
     parser.add_argument('--workers', type=int, default=8,
                        help='Number of parallel workers for training (default: 8, use 1 for single-process)')
     parser.add_argument('--epsilon', type=float, default=0.1,

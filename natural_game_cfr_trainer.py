@@ -126,12 +126,14 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Performance metrics for natural training
         self.natural_metrics = {
             'games_played': 0,
+            'hands_played': 0,  # Track total hands across all games
             'scenarios_discovered': 0,
             'unique_scenarios': 0,
             'hero_win_rate': 0.0,
             'villain_win_rate': 0.0,
             'avg_pot_size': 0.0,
-            'exploration_rate': 0.0
+            'exploration_rate': 0.0,
+            'avg_hands_per_game': 0.0  # Track average hands per game
         }
         
         self.logger.info("🎲 Natural Game CFR Trainer Initialized!")
@@ -192,9 +194,33 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         else:
             return "medium"
     
-    def generate_random_game_state(self):
+    def generate_game_parameters(self):
+        """
+        Generate random game parameters (stack sizes, blinds) for a full game.
+        These parameters will be fixed for the entire game until one player is busted.
+        
+        Returns:
+            dict: Game parameters with stack sizes and blinds level
+        """
+        # Random stack sizes - both players start with the same stack for this game
+        initial_stack_bb = random.randint(8, 200)
+        
+        # Random blinds level
+        blinds_level = random.choice(["low", "medium", "high"])
+        
+        return {
+            'initial_stack_bb': initial_stack_bb,
+            'blinds_level': blinds_level
+        }
+
+    def generate_random_game_state(self, hero_stack_bb=None, villain_stack_bb=None, blinds_level=None):
         """
         Generate a random game state for natural Monte Carlo simulation.
+        
+        Args:
+            hero_stack_bb: Hero's current stack size (if None, randomized)
+            villain_stack_bb: Villain's current stack size (if None, randomized) 
+            blinds_level: Current blinds level (if None, randomized)
         
         Returns:
             dict: Game state with random cards, positions, stacks, blinds
@@ -208,12 +234,15 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         hero_position = random.choice(["BTN", "BB"])
         villain_position = "BB" if hero_position == "BTN" else "BTN"
         
-        # Random stack sizes (can be different for hero and villain)
-        hero_stack_bb = random.randint(8, 200)
-        villain_stack_bb = random.randint(8, 200)
+        # Use provided stack sizes or generate random ones (backward compatibility)
+        if hero_stack_bb is None:
+            hero_stack_bb = random.randint(8, 200)
+        if villain_stack_bb is None:
+            villain_stack_bb = random.randint(8, 200)
         
-        # Random blinds level
-        blinds_level = random.choice(["low", "medium", "high"])
+        # Use provided blinds level or generate random one (backward compatibility)
+        if blinds_level is None:
+            blinds_level = random.choice(["low", "medium", "high"])
         
         # Classify hands and stacks
         hero_hand_category = self.classify_hand_category(hero_cards)
@@ -430,18 +459,23 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         return {action: prob for action, prob in zip(available_actions, strategy_probs)}
     
-    def monte_carlo_game_simulation(self):
+    def simulate_single_hand(self, hero_stack_bb=None, villain_stack_bb=None, blinds_level=None):
         """
-        Simulate a complete poker hand using Monte Carlo approach.
+        Simulate a single poker hand using Monte Carlo approach.
         
         Both players act according to their learned strategies.
         Records natural scenarios that emerge during gameplay.
         
+        Args:
+            hero_stack_bb: Hero's current stack size (if None, randomized)
+            villain_stack_bb: Villain's current stack size (if None, randomized)
+            blinds_level: Current blinds level (if None, randomized)
+        
         Returns:
-            dict: Complete game simulation result
+            dict: Complete hand simulation result
         """
-        # Generate random game state
-        game_state = self.generate_random_game_state()
+        # Generate game state with specified or random parameters
+        game_state = self.generate_random_game_state(hero_stack_bb, villain_stack_bb, blinds_level)
         
         # Track if this is exploration
         exploration_used = False
@@ -487,14 +521,110 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Update strategies for both players
         self.update_strategies_from_game(game_state, payoff_result)
         
-        # Track metrics
-        self.natural_metrics['games_played'] += 1
+        # Note: games_played is now tracked in simulate_full_game, not here
         
         return {
             'game_state': game_state,
             'natural_scenario': natural_scenario,
             'payoff_result': payoff_result,
             'exploration_used': exploration_used
+        }
+    
+    def simulate_full_game(self):
+        """
+        Simulate a complete poker game consisting of multiple hands with fixed parameters.
+        
+        A game consists of:
+        1. Randomly selecting initial stack size and blind level
+        2. Playing multiple hands with these fixed parameters
+        3. Continuing until one player is busted (stack = 0)
+        
+        Returns:
+            dict: Complete game simulation result with all hands played
+        """
+        # Generate random game parameters (fixed for this entire game)
+        game_params = self.generate_game_parameters()
+        initial_stack_bb = game_params['initial_stack_bb']
+        blinds_level = game_params['blinds_level']
+        
+        # Initialize player stacks
+        hero_stack_bb = initial_stack_bb
+        villain_stack_bb = initial_stack_bb
+        
+        hands_played = []
+        game_start_time = time.time()
+        hand_count = 0
+        max_hands_per_game = 1000  # Safety limit to prevent infinite games
+        
+        self.logger.debug(f"Starting new game: initial_stack={initial_stack_bb}bb, blinds={blinds_level}")
+        
+        while hero_stack_bb > 0 and villain_stack_bb > 0 and hand_count < max_hands_per_game:
+            # Check if either player can afford the blinds
+            min_stack_for_blinds = 1.5  # Need at least 1.5bb for small blind + big blind
+            if hero_stack_bb < min_stack_for_blinds or villain_stack_bb < min_stack_for_blinds:
+                break
+                
+            # Simulate one hand with current stack sizes
+            hand_result = self.simulate_single_hand(hero_stack_bb, villain_stack_bb, blinds_level)
+            
+            # Extract payoff information
+            payoff_result = hand_result['payoff_result']
+            hero_payoff = payoff_result['hero_payoff']
+            villain_payoff = payoff_result['villain_payoff']
+            
+            # Update stack sizes based on hand result
+            hero_stack_bb += hero_payoff
+            villain_stack_bb += villain_payoff
+            
+            # Ensure stacks don't go negative (shouldn't happen but safety check)
+            hero_stack_bb = max(0, hero_stack_bb)
+            villain_stack_bb = max(0, villain_stack_bb)
+            
+            # Record hand information
+            hand_info = {
+                'hand_number': hand_count + 1,
+                'hero_stack_before': hero_stack_bb - hero_payoff,
+                'villain_stack_before': villain_stack_bb - villain_payoff,
+                'hero_stack_after': hero_stack_bb,
+                'villain_stack_after': villain_stack_bb,
+                'hero_payoff': hero_payoff,
+                'villain_payoff': villain_payoff,
+                'natural_scenario': hand_result['natural_scenario'],
+                'game_state': hand_result['game_state']
+            }
+            hands_played.append(hand_info)
+            hand_count += 1
+            
+            self.logger.debug(f"Hand {hand_count}: Hero {hero_stack_bb:.1f}bb, Villain {villain_stack_bb:.1f}bb")
+        
+        # Determine game winner
+        if hero_stack_bb <= 0:
+            game_winner = 'villain'
+        elif villain_stack_bb <= 0:
+            game_winner = 'hero'
+        else:
+            # Game ended due to max hands limit
+            game_winner = 'hero' if hero_stack_bb > villain_stack_bb else 'villain'
+        
+        game_duration = time.time() - game_start_time
+        
+        # Update game-level metrics
+        self.natural_metrics['games_played'] += 1
+        total_hands = len(hands_played)
+        
+        self.logger.info(f"Game completed: {total_hands} hands, winner: {game_winner}, "
+                        f"duration: {game_duration:.2f}s, stacks: Hero {hero_stack_bb:.1f}bb, Villain {villain_stack_bb:.1f}bb")
+        
+        return {
+            'game_params': game_params,
+            'initial_stack_bb': initial_stack_bb,
+            'blinds_level': blinds_level,
+            'hands_played': hands_played,
+            'hand_count': total_hands,
+            'game_winner': game_winner,
+            'final_hero_stack': hero_stack_bb,
+            'final_villain_stack': villain_stack_bb,
+            'game_duration': game_duration
         }
     
     def update_game_state_with_action(self, game_state, action, is_hero):
@@ -838,11 +968,14 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         print("=" * 60)
         
         training_start_time = time.time()
+        total_hands_played = 0  # Track total hands across all games
         
         for game_num in range(n_games):
-            # Simulate one game
+            # Simulate one full game (multiple hands until bust)
             try:
-                game_result = self.monte_carlo_game_simulation()
+                game_result = self.simulate_full_game()
+                # Update total hands count
+                total_hands_played += game_result['hand_count']
             except Exception as e:
                 self.logger.error(f"Error in game {game_num + 1}: {e}")
                 from logging_config import log_exception
@@ -851,7 +984,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             
             # Log progress
             if (game_num + 1) % log_interval == 0:
-                self.log_training_progress(game_num + 1, training_start_time)
+                self.log_training_progress(game_num + 1, training_start_time, total_hands_played)
             
             # Save progress
             if (game_num + 1) % save_interval == 0:
@@ -861,20 +994,31 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         training_end_time = time.time()
         total_training_time = training_end_time - training_start_time
         
+        # Update final metrics
+        self.natural_metrics['hands_played'] = total_hands_played
+        if self.natural_metrics['games_played'] > 0:
+            self.natural_metrics['avg_hands_per_game'] = total_hands_played / self.natural_metrics['games_played']
+        
         self.logger.info("🎉 Natural Game CFR Training Complete!")
         self.logger.info(f"   ⏱️  Total time: {total_training_time/60:.1f} minutes")
         self.logger.info(f"   🎲 Games played: {self.natural_metrics['games_played']:,}")
+        self.logger.info(f"   🃏 Hands played: {total_hands_played:,}")
+        self.logger.info(f"   📊 Average hands per game: {self.natural_metrics['avg_hands_per_game']:.1f}")
         self.logger.info(f"   📊 Unique scenarios: {self.natural_metrics['unique_scenarios']}")
         self.logger.info(f"   🎯 Total scenarios recorded: {len(self.natural_scenarios)}")
         
         print(f"\n🎉 Natural Game CFR Training Complete!")
         print(f"   ⏱️  Total time: {total_training_time/60:.1f} minutes")
         print(f"   🎲 Games played: {self.natural_metrics['games_played']:,}")
+        print(f"   🃏 Hands played: {total_hands_played:,}")
+        print(f"   📊 Average hands per game: {self.natural_metrics['avg_hands_per_game']:.1f}")
         print(f"   📊 Unique scenarios: {self.natural_metrics['unique_scenarios']}")
         print(f"   🎯 Total scenarios recorded: {len(self.natural_scenarios)}")
         
         return {
             'games_played': self.natural_metrics['games_played'],
+            'hands_played': total_hands_played,
+            'avg_hands_per_game': self.natural_metrics['avg_hands_per_game'],
             'unique_scenarios': self.natural_metrics['unique_scenarios'],
             'total_training_time': total_training_time,
             'natural_scenarios': len(self.natural_scenarios),
@@ -882,16 +1026,23 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'villain_strategy_scenarios': len(self.villain_strategy_sum)
         }
     
-    def log_training_progress(self, games_completed, start_time):
+    def log_training_progress(self, games_completed, start_time, total_hands_played=None):
         """
         Log training progress with key metrics.
         
         Args:
             games_completed: Number of games completed
             start_time: Training start timestamp
+            total_hands_played: Total number of hands played across all games
         """
         elapsed_time = time.time() - start_time
         games_per_minute = (games_completed / elapsed_time) * 60 if elapsed_time > 0 else 0
+        
+        # Update metrics if hands tracking provided
+        if total_hands_played is not None:
+            self.natural_metrics['hands_played'] = total_hands_played
+            if games_completed > 0:
+                self.natural_metrics['avg_hands_per_game'] = total_hands_played / games_completed
         
         # Calculate win rates and other statistics
         if self.natural_scenarios:
@@ -917,8 +1068,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         else:
             eta_str = ""
         
-        # Console output
-        console_msg = (f"Game {games_completed:6,}: "
+        # Console output with hands information
+        hands_info = f", {total_hands_played} hands" if total_hands_played else ""
+        avg_hands_info = f", avg={self.natural_metrics['avg_hands_per_game']:.1f}h/g" if total_hands_played else ""
+        console_msg = (f"Game {games_completed:6,}{hands_info}{avg_hands_info}: "
                       f"{self.natural_metrics['unique_scenarios']:3d} scenarios, "
                       f"hero_wr={hero_win_rate:.2f}, "
                       f"rate={games_per_minute:.1f}/min{eta_str}")
@@ -929,6 +1082,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         self.logger.info(f"  Time elapsed: {elapsed_time/60:.1f} minutes")
         self.logger.info(f"  Games per minute: {games_per_minute:.1f}")
         self.logger.info(f"  Total games played: {self.natural_metrics['games_played']:,}")
+        if total_hands_played:
+            self.logger.info(f"  Total hands played: {total_hands_played:,}")
+            self.logger.info(f"  Average hands per game: {self.natural_metrics['avg_hands_per_game']:.1f}")
         self.logger.info(f"  Monte Carlo iterations completed: {games_completed:,}")
         self.logger.info(f"  Unique scenarios discovered: {self.natural_metrics['unique_scenarios']}")
         self.logger.info(f"  Total scenarios recorded: {len(self.natural_scenarios)}")
