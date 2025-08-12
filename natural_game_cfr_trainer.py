@@ -1014,6 +1014,13 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         self.logger.info(f"   📊 Unique scenarios: {self.natural_metrics['unique_scenarios']}")
         self.logger.info(f"   🎯 Total scenarios recorded: {len(self.natural_scenarios)}")
         
+        # Export final unified scenario lookup table
+        self.logger.info("📊 Exporting final unified scenario lookup table...")
+        try:
+            self.export_unified_scenario_lookup_csv("scenario_lookup_table.csv")
+        except Exception as export_error:
+            self.logger.warning(f"⚠️ Final scenario lookup table export failed: {export_error}")
+        
         print(f"\n🎉 Natural Game CFR Training Complete!")
         print(f"   ⏱️  Total time: {total_training_time/60:.1f} minutes")
         print(f"   🎲 Games played: {self.natural_metrics['games_played']:,}")
@@ -1742,6 +1749,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         - regret: Current average regret for this scenario
         - average_strategy: Primary learned strategy (FOLD/CALL/RAISE group)
         - strategy_confidence: Confidence percentage for the primary strategy
+        - fold_pct: Percentage of fold actions
+        - call_pct: Percentage of call actions
+        - raise_small_pct: Percentage of small raise actions
+        - raise_mid_pct: Percentage of mid raise actions  
+        - raise_high_pct: Percentage of high raise actions
+        - is_3bet: Binary indicator for 3-bet scenarios (1 if 3-bet context, 0 otherwise)
         """
         self.logger.info(f"📊 Exporting unified scenario lookup table to {filename}...")
         
@@ -1780,16 +1793,33 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             strategy_confidence = 0.0
             opponent_action = "mixed"  # For natural games, we aggregate across different opponent contexts
             
+            # Initialize action percentages
+            fold_pct = 0.0
+            call_pct = 0.0
+            raise_small_pct = 0.0
+            raise_mid_pct = 0.0
+            raise_high_pct = 0.0
+            is_3bet = 0  # Binary indicator - default to 0, could be enhanced based on betting context
+            
             if scenario_key in self.strategy_sum:
                 strategy_counts = self.strategy_sum[scenario_key]
                 if sum(strategy_counts.values()) > 0:
                     total_count = sum(strategy_counts.values())
                     
+                    # Calculate individual action percentages
+                    fold_pct = (strategy_counts.get('fold', 0.0) / total_count) * 100
+                    call_small_total = strategy_counts.get('call_small', 0.0)
+                    call_mid_total = strategy_counts.get('call_mid', 0.0) 
+                    call_high_total = strategy_counts.get('call_high', 0.0)
+                    call_pct = ((call_small_total + call_mid_total + call_high_total) / total_count) * 100
+                    
+                    raise_small_pct = (strategy_counts.get('raise_small', 0.0) / total_count) * 100
+                    raise_mid_pct = (strategy_counts.get('raise_mid', 0.0) / total_count) * 100
+                    raise_high_pct = (strategy_counts.get('raise_high', 0.0) / total_count) * 100
+                    
                     # Group actions (same logic as GCP trainer)
                     fold_total = strategy_counts.get('fold', 0.0)
-                    call_total = (strategy_counts.get('call_small', 0.0) + 
-                                 strategy_counts.get('call_mid', 0.0) + 
-                                 strategy_counts.get('call_high', 0.0))
+                    call_total = call_small_total + call_mid_total + call_high_total
                     raise_total = (strategy_counts.get('raise_small', 0.0) + 
                                   strategy_counts.get('raise_mid', 0.0) + 
                                   strategy_counts.get('raise_high', 0.0))
@@ -1804,6 +1834,14 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                     if group_totals:
                         average_strategy = max(group_totals.items(), key=lambda x: x[1])[0]
                         strategy_confidence = max(group_totals.values())
+                    
+                    # Determine 3-bet indicator based on scenario context
+                    # In preflop poker, 3-bet typically involves strong hands in certain positions/stack depths
+                    if (hand_category in ['premium_pairs', 'premium_aces'] and 
+                        position == 'BB' and 
+                        raise_total > call_total and 
+                        raise_total > fold_total):
+                        is_3bet = 1
             
             # Build unified lookup table row
             row = {
@@ -1818,6 +1856,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 'regret': round(average_regret, 6),
                 'average_strategy': average_strategy,
                 'strategy_confidence': round(strategy_confidence, 2),
+                'fold_pct': round(fold_pct, 2),
+                'call_pct': round(call_pct, 2),
+                'raise_small_pct': round(raise_small_pct, 2),
+                'raise_mid_pct': round(raise_mid_pct, 2),
+                'raise_high_pct': round(raise_high_pct, 2),
+                'is_3bet': is_3bet,
                 'last_updated': current_time
             }
             
@@ -1836,6 +1880,8 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             self.logger.info(f"   📊 Total games across all scenarios: {df['iterations_completed'].sum():,}")
             self.logger.info(f"   🎯 Average games per scenario: {df['iterations_completed'].mean():.1f}")
             self.logger.info(f"   📈 Scenarios with >10 games: {len(df[df['iterations_completed'] > 10])}")
+            if len(df) > 0:
+                self.logger.info(f"   🔥 Most played scenario: {df.iloc[0]['scenario_key']} ({df.iloc[0]['iterations_completed']} games)")
             
             # Show strategy distribution
             if len(df) > 0:
@@ -1844,6 +1890,17 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 for strategy, count in strategy_dist.items():
                     pct = count/len(export_data)*100 if len(export_data) > 0 else 0
                     self.logger.info(f"      {strategy}: {count} scenarios ({pct:.1f}%)")
+                
+                # Show 3-bet statistics
+                threebets = len(df[df['is_3bet'] == 1])
+                threebet_pct = (threebets / len(df)) * 100 if len(df) > 0 else 0
+                self.logger.info(f"   🎲 3-bet scenarios: {threebets} ({threebet_pct:.1f}%)")
+                
+                # Show action frequency summary
+                avg_fold = df['fold_pct'].mean()
+                avg_call = df['call_pct'].mean()
+                avg_raise = (df['raise_small_pct'] + df['raise_mid_pct'] + df['raise_high_pct']).mean()
+                self.logger.info(f"   📊 Average action frequencies: Fold {avg_fold:.1f}%, Call {avg_call:.1f}%, Raise {avg_raise:.1f}%")
             
             return df
         else:
@@ -1852,7 +1909,8 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             empty_df = pd.DataFrame(columns=[
                 'scenario_key', 'hand_category', 'stack_category', 'blinds_level', 
                 'position', 'opponent_action', 'iterations_completed', 'total_rollouts', 
-                'regret', 'average_strategy', 'strategy_confidence', 'last_updated'
+                'regret', 'average_strategy', 'strategy_confidence', 'fold_pct', 'call_pct',
+                'raise_small_pct', 'raise_mid_pct', 'raise_high_pct', 'is_3bet', 'last_updated'
             ])
             empty_df.to_csv(filename, index=False)
             return empty_df
