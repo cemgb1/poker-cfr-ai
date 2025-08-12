@@ -134,6 +134,11 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         self.realistic_scenario_cache = {}
         self.filtered_scenario_count = 0
         
+        # Performance optimizations
+        self.scenario_key_cache = {}  # Cache for scenario key generation
+        self.action_cache = {}        # Cache for available actions
+        self.memory_cleanup_interval = 1000  # Clean memory every N games
+        
         # Performance metrics for natural training
         self.natural_metrics = {
             'games_played': 0,
@@ -543,7 +548,7 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def get_scenario_key_from_game_state(self, game_state, is_hero=True):
         """
-        Generate enhanced scenario key from current game state.
+        Generate enhanced scenario key from current game state with caching.
         
         Updated to 7-column format: hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet
         
@@ -554,6 +559,24 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         Returns:
             str: Enhanced scenario key for strategy lookup
         """
+        # Create cache key
+        cache_key = (
+            game_state.get('hero_hand_category', ''),
+            game_state.get('hero_position', ''),
+            game_state.get('hero_stack_category', ''),
+            game_state.get('villain_hand_category', ''),
+            game_state.get('villain_position', ''),
+            game_state.get('villain_stack_category', ''),
+            game_state.get('blinds_level', ''),
+            len(game_state.get('action_history', [])),
+            game_state.get('is_3bet', False),
+            is_hero
+        )
+        
+        # Check cache first
+        if cache_key in self.scenario_key_cache:
+            return self.scenario_key_cache[cache_key]
+        
         if is_hero:
             hand_category = game_state['hero_hand_category']
             position = game_state['hero_position']
@@ -578,7 +601,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         opponent_action_str = str(opponent_action) if opponent_action else 'none'
         is_3bet_str = 'True' if is_3bet else 'False'
         
-        return f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{opponent_action_str}|{is_3bet_str}"
+        scenario_key = f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{opponent_action_str}|{is_3bet_str}"
+        
+        # Cache the result
+        self.scenario_key_cache[cache_key] = scenario_key
+        
+        return scenario_key
     
     def _get_last_opponent_action(self, action_history, is_hero):
         """
@@ -1384,10 +1412,16 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             if (game_num + 1) % log_interval == 0:
                 self.log_training_progress(game_num + 1, training_start_time, total_hands_played)
             
-            # Save progress
+            # Save progress and cleanup memory
             if (game_num + 1) % save_interval == 0:
                 checkpoint_file = f"natural_cfr_checkpoint_{game_num + 1}.pkl"
                 self.save_training_state(checkpoint_file)
+                # Perform memory cleanup after saving
+                self._cleanup_memory()
+            
+            # Additional memory cleanup at regular intervals
+            elif (game_num + 1) % self.memory_cleanup_interval == 0:
+                self._cleanup_memory()
         
         training_end_time = time.time()
         total_training_time = training_end_time - training_start_time
@@ -2309,6 +2343,33 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Calculate average payoff
         total_payoff = sum(s['hero_payoff'] for s in matching_scenarios)
         return total_payoff / len(matching_scenarios)
+    
+    def _cleanup_memory(self):
+        """Perform periodic memory cleanup to prevent memory bloat."""
+        # Clear caches if they get too large
+        if len(self.scenario_key_cache) > 5000:
+            # Keep only the most recent 2500 entries
+            keys_to_remove = list(self.scenario_key_cache.keys())[:-2500]
+            for key in keys_to_remove:
+                del self.scenario_key_cache[key]
+        
+        if len(self.action_cache) > 3000:
+            # Keep only the most recent 1500 entries  
+            keys_to_remove = list(self.action_cache.keys())[:-1500]
+            for key in keys_to_remove:
+                del self.action_cache[key]
+        
+        if len(self.realistic_scenario_cache) > 10000:
+            # Keep only the most recent 5000 entries
+            keys_to_remove = list(self.realistic_scenario_cache.keys())[:-5000]
+            for key in keys_to_remove:
+                del self.realistic_scenario_cache[key]
+        
+        # Limit natural scenarios history to prevent memory bloat
+        if len(self.natural_scenarios) > 10000:
+            self.natural_scenarios = self.natural_scenarios[-5000:]  # Keep recent 5000
+        
+        self.logger.debug("🧹 Memory cleanup completed")
     
     def archive_old_files(self):
         """
