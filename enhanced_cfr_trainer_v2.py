@@ -8,6 +8,7 @@ This module provides advanced CFR training capabilities including:
 2. Sequential scenario training with multiple rollouts per visit
 3. Configurable stopping conditions and convergence checking
 4. Comprehensive performance tracking and statistics
+5. NEW: Unified scenario lookup table export for real-time monitoring
 
 Key Features:
 - Scenario keys: hand_category|position|stack_category|blinds_level (no bet_size_category)
@@ -17,6 +18,7 @@ Key Features:
 - Balanced sampling: Ensures proportional coverage across hand categories
 - Sequential training: Process scenarios in order with multiple rollouts per visit
 - Advanced stopping conditions: Minimum rollouts requirement + regret stabilization
+- Default tournament penalty: 0.2 (encourages moderate risk-taking)
 
 Training Process (Enhanced CFR):
 1. Select scenario from deterministic set of 330 combinations

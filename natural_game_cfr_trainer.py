@@ -33,6 +33,13 @@ instead of pre-defined scenarios. Key features:
    - Tracks opponent_action, is_3bet, full action history, and payoffs
    - All scenarios emerge naturally from gameplay
 
+6. NEW: Unified Scenario Lookup Table:
+   - Real-time CSV export (scenario_lookup_table.csv) at every log interval
+   - Provides live monitoring of learning progress and scenario coverage
+   - Same format as GCP trainer for consistency
+
+7. Default tournament penalty: 0.2 (encourages moderate risk-taking)
+
 Classes:
 - NaturalGameCFRTrainer: Main trainer implementing natural Monte Carlo CFR
 """

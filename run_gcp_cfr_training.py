@@ -9,8 +9,11 @@ Features:
 - Outputs lookup-table CSV with percentage choices per action
 - Logs every 15 minutes or at least every 500 iterations
 - Records model performance to separate CSV for analysis/charting
+- NEW: Unified scenario lookup table (scenario_lookup_table.csv) updated at every log interval
+- NEW: Real-time monitoring of learning progress and scenario coverage
 - Moves unused files to archivefolder at end
 - Uses EnhancedCFRTrainer and generate_enhanced_scenarios
+- Default tournament penalty: 0.2 (encourages more risk-taking)
 """
 
 import multiprocessing as mp
