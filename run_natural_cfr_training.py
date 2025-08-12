@@ -568,7 +568,7 @@ def run_demo_mode(args):
     demo_trainer = NaturalGameCFRTrainer(
         epsilon_exploration=0.2,  # Higher exploration for demo
         min_visit_threshold=3,    # Lower threshold for demo
-        tournament_survival_penalty=0.6,
+        tournament_survival_penalty=0.2,
         logger=logger
     )
     logger.info("Demo trainer initialized successfully")
@@ -797,8 +797,8 @@ Each game consists of multiple hands played with fixed stack and blind sizes unt
                        help='Epsilon exploration rate (default: 0.1)')
     parser.add_argument('--min-visits', type=int, default=5,
                        help='Minimum visits threshold (default: 5)')
-    parser.add_argument('--tournament-penalty', type=float, default=0.6,
-                       help='Tournament survival penalty factor (default: 0.6)')
+    parser.add_argument('--tournament-penalty', type=float, default=0.2,
+                       help='Tournament survival penalty factor (default: 0.2)')
     
     # CFR parameters
     parser.add_argument('--enable-pruning', action='store_true', default=True,

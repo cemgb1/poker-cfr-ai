@@ -639,6 +639,9 @@ class GCPCFRTrainer:
                 # Periodic logging and checkpointing (every 15 minutes or as configured)
                 current_time = time.time()
                 if current_time - last_log_time >= (self.log_interval_minutes * 60):
+                    # Combine worker results before logging to ensure unified CSV has latest data
+                    if worker_results:
+                        self.combine_worker_results(worker_results)
                     self.log_training_progress(current_time)
                     self.save_checkpoint(worker_results, current_time)  # Add checkpointing
                     last_log_time = current_time
@@ -657,6 +660,9 @@ class GCPCFRTrainer:
                 # Periodic logging even during quiet periods
                 current_time = time.time()
                 if current_time - last_log_time >= (self.log_interval_minutes * 60):
+                    # Combine worker results before logging to ensure unified CSV has latest data
+                    if worker_results:
+                        self.combine_worker_results(worker_results)
                     self.log_training_progress(current_time)
                     self.save_checkpoint(worker_results, current_time)
                     last_log_time = current_time
@@ -737,6 +743,7 @@ class GCPCFRTrainer:
         """
         Log periodic training progress with memory usage monitoring.
         Enhanced for long-running GCP jobs.
+        Now includes unified scenario lookup table export at each logging interval.
         """
         elapsed_time = current_time - self.start_time
         
@@ -787,6 +794,12 @@ class GCPCFRTrainer:
             self.logger.info(f"   📊 Scenarios trained: {total_trained_scenarios}/330 ({total_trained_scenarios/330*100:.1f}%)")
             self.logger.info(f"   🔄 Total training iterations: {total_training_iterations:,}")
             self.logger.info(f"   📈 Avg iterations per scenario: {avg_iterations_per_scenario:.1f}")
+        
+        # Export unified scenario lookup table at each logging interval
+        try:
+            self.export_unified_scenario_lookup_csv("scenario_lookup_table.csv")
+        except Exception as export_error:
+            self.logger.warning(f"⚠️ Scenario lookup table export failed: {export_error}")
     
     def save_checkpoint(self, worker_results, current_time):
         """
@@ -1153,6 +1166,144 @@ class GCPCFRTrainer:
         
         return df
     
+    def export_unified_scenario_lookup_csv(self, filename="scenario_lookup_table.csv"):
+        """
+        Export unified scenario lookup table with aggregated data from all workers.
+        This is updated at every logging interval to provide real-time learning progress.
+        
+        CSV contains:
+        - scenario_key: Unique identifier combining all scenario metrics
+        - hand_category: Type of poker hand (premium_pairs, medium_aces, etc.)
+        - stack_category: Stack depth category (ultra_short, short, medium, deep, very_deep)
+        - blinds_level: Blinds level (low, medium, high)
+        - position: Player position (BTN, BB)
+        - opponent_action: Current opponent context (if applicable)
+        - iterations_completed: Number of training iterations completed for this scenario
+        - total_rollouts: Total rollouts performed (same as iterations for enhanced CFR)
+        - regret: Current average regret for this scenario
+        - average_strategy: Primary learned strategy (FOLD/CALL/RAISE group)
+        - strategy_confidence: Confidence percentage for the primary strategy
+        """
+        self.logger.info(f"📊 Exporting unified scenario lookup table to {filename}...")
+        
+        from enhanced_cfr_preflop_generator_v2 import PREFLOP_HAND_RANGES
+        
+        export_data = []
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Get all unique scenarios that have been encountered
+        all_scenario_keys = set()
+        if hasattr(self, 'combined_scenario_counter'):
+            all_scenario_keys.update(self.combined_scenario_counter.keys())
+        if hasattr(self, 'combined_strategy_sum'):
+            all_scenario_keys.update(self.combined_strategy_sum.keys())
+        if hasattr(self, 'combined_regret_sum'):
+            all_scenario_keys.update(self.combined_regret_sum.keys())
+        
+        for scenario_key in all_scenario_keys:
+            # Parse scenario key: hand_category|position|stack_category|blinds_level
+            parts = scenario_key.split("|")
+            if len(parts) >= 4:
+                hand_category = parts[0]
+                position = parts[1] 
+                stack_category = parts[2]
+                blinds_level = parts[3]
+            else:
+                continue
+            
+            # Get training statistics
+            iterations_completed = self.combined_scenario_counter.get(scenario_key, 0) if hasattr(self, 'combined_scenario_counter') else 0
+            total_rollouts = iterations_completed  # Same as iterations for enhanced CFR
+            
+            # Calculate average regret
+            average_regret = 0.0
+            if hasattr(self, 'combined_regret_sum') and scenario_key in self.combined_regret_sum:
+                regret_values = list(self.combined_regret_sum[scenario_key].values())
+                if regret_values:
+                    average_regret = sum(regret_values) / len(regret_values)
+            
+            # Calculate strategy information
+            average_strategy = "UNKNOWN"
+            strategy_confidence = 0.0
+            opponent_action = "mixed"  # Default since we aggregate across different opponent contexts
+            
+            if hasattr(self, 'combined_strategy_sum') and scenario_key in self.combined_strategy_sum:
+                strategy_counts = self.combined_strategy_sum[scenario_key]
+                if sum(strategy_counts.values()) > 0:
+                    total_count = sum(strategy_counts.values())
+                    
+                    # Group actions (same logic as existing export_lookup_table_csv)
+                    fold_total = strategy_counts.get('fold', 0.0)
+                    call_total = (strategy_counts.get('call_small', 0.0) + 
+                                 strategy_counts.get('call_mid', 0.0) + 
+                                 strategy_counts.get('call_high', 0.0))
+                    raise_total = (strategy_counts.get('raise_small', 0.0) + 
+                                  strategy_counts.get('raise_mid', 0.0) + 
+                                  strategy_counts.get('raise_high', 0.0))
+                    
+                    # Determine primary strategy
+                    group_totals = {
+                        'FOLD': (fold_total / total_count) * 100,
+                        'CALL': (call_total / total_count) * 100,
+                        'RAISE': (raise_total / total_count) * 100
+                    }
+                    
+                    if group_totals:
+                        average_strategy = max(group_totals.items(), key=lambda x: x[1])[0]
+                        strategy_confidence = max(group_totals.values())
+            
+            # Build unified lookup table row
+            row = {
+                'scenario_key': scenario_key,
+                'hand_category': hand_category,
+                'stack_category': stack_category,
+                'blinds_level': blinds_level,
+                'position': position,
+                'opponent_action': opponent_action,
+                'iterations_completed': iterations_completed,
+                'total_rollouts': total_rollouts,
+                'regret': round(average_regret, 6),
+                'average_strategy': average_strategy,
+                'strategy_confidence': round(strategy_confidence, 2),
+                'last_updated': current_time
+            }
+            
+            export_data.append(row)
+        
+        if export_data:
+            df = pd.DataFrame(export_data)
+            
+            # Sort by iterations_completed descending, then by strategy_confidence
+            df = df.sort_values(['iterations_completed', 'strategy_confidence'], ascending=[False, False])
+            
+            # Export to CSV, replacing previous version
+            df.to_csv(filename, index=False)
+            
+            self.logger.info(f"✅ Exported unified scenario lookup table: {len(export_data)} scenarios")
+            self.logger.info(f"   📊 Total iterations across all scenarios: {df['iterations_completed'].sum():,}")
+            self.logger.info(f"   🎯 Average iterations per scenario: {df['iterations_completed'].mean():.1f}")
+            self.logger.info(f"   📈 Scenarios with >100 iterations: {len(df[df['iterations_completed'] > 100])}")
+            
+            # Show strategy distribution
+            if len(df) > 0:
+                strategy_dist = df['average_strategy'].value_counts()
+                self.logger.info(f"   🎯 Strategy Distribution:")
+                for strategy, count in strategy_dist.items():
+                    pct = count/len(export_data)*100 if len(export_data) > 0 else 0
+                    self.logger.info(f"      {strategy}: {count} scenarios ({pct:.1f}%)")
+            
+            return df
+        else:
+            self.logger.info("📊 No scenario data available yet for lookup table export")
+            # Create empty CSV with headers for consistency
+            empty_df = pd.DataFrame(columns=[
+                'scenario_key', 'hand_category', 'stack_category', 'blinds_level', 
+                'position', 'opponent_action', 'iterations_completed', 'total_rollouts', 
+                'regret', 'average_strategy', 'strategy_confidence', 'last_updated'
+            ])
+            empty_df.to_csv(filename, index=False)
+            return empty_df
+    
     def cleanup_and_archive_files(self):
         """
         Move all unused files to archivefolder, keeping only essential model files
@@ -1170,7 +1321,8 @@ class GCPCFRTrainer:
             'run_gcp_cfr_training.py',
             'requirements.txt',
             'gcp_cfr_lookup_table.csv',  # Final model output
-            'gcp_cfr_performance.csv'    # Performance metrics
+            'gcp_cfr_performance.csv',   # Performance metrics
+            'scenario_lookup_table.csv'  # Unified scenario lookup table (NEW)
         }
         
         # Get all Python files and other files in root
