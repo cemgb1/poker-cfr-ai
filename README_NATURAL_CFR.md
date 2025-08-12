@@ -8,11 +8,20 @@ Instead of training on pre-defined scenarios, this system generates natural poke
 
 ## 🚀 Key Features
 
-### Natural Monte Carlo Simulation
-- Deals random cards to both players
-- Randomizes position, stack sizes, blinds, and game conditions
+### Natural Monte Carlo Game Simulation
+- Organizes simulation as a series of complete poker "games"
+- Each game: randomly selects stack size and blind level, fixed for entire game
+- Plays multiple hands with these fixed parameters until one player is busted (stack = 0)
+- Each hand deals random cards and positions while maintaining game parameters
 - Both players act using their learned strategies (no hardcoded behavior)
 - Multi-step betting sequences with proper game tree handling
+
+### Game-Based Training Structure
+- **Games**: The primary simulation unit - each game plays until bust
+- **Hands**: Individual poker hands within a game (preflop-only currently)
+- **Fixed Parameters**: Stack size and blinds stay constant within each game
+- **Variable Elements**: Cards and positions randomized per hand within game
+- Configurable number of games for training (not individual hands)
 
 ### Co-evolving Strategies
 - Hero and villain maintain separate strategy databases
@@ -64,7 +73,7 @@ python run_natural_cfr_training.py --mode analysis --resume final.pkl
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--games` | 10000 | Number of games to simulate |
+| `--games` | 10000 | Number of complete games to simulate (each game = multiple hands until bust) |
 | `--epsilon` | 0.1 | Exploration rate (0.0-1.0) |
 | `--min-visits` | 5 | Minimum visits before considering scenario trained |
 | `--tournament-penalty` | 0.6 | Tournament survival penalty factor |
@@ -75,15 +84,18 @@ python run_natural_cfr_training.py --mode analysis --resume final.pkl
 
 ```
 🚀 Natural Game CFR Training System
-🎯 Games to simulate: 1,000
+🎯 Games to simulate: 1,000 (each game = multiple hands until bust)
 🔍 Epsilon exploration: 0.1
 
-Game   100:  25 scenarios, hero_wr=0.48, rate=224.5/min
-Game   200:  27 scenarios, hero_wr=0.49, rate=228.6/min
+Game   100, 1,247 hands, avg=12.5h/g:  25 scenarios, hero_wr=0.48, rate=224.5/min
+Game   200, 2,508 hands, avg=12.5h/g:  27 scenarios, hero_wr=0.49, rate=228.6/min
 ...
-Game 1,000:  42 scenarios, hero_wr=0.51, rate=235.2/min
+Game 1,000, 12,456 hands, avg=12.5h/g:  42 scenarios, hero_wr=0.51, rate=235.2/min
 
 🎉 Training completed!
+📊 Total games played: 1,000
+🃏 Total hands played: 12,456
+📊 Average hands per game: 12.5
 📊 Unique scenarios discovered: 42
 🎯 Hero win rate: 51.0%
 🎲 Showdown rate: 58.6%
@@ -150,12 +162,16 @@ The system generates several output files:
 ## 🔬 Technical Details
 
 ### Game Flow
-1. Deal random hole cards to both players
-2. Assign random positions, stack sizes, blinds level
-3. Players act using their current learned strategies
-4. Record the natural scenario that emerges
-5. Calculate payoffs and update both players' strategies via CFR
-6. Repeat for thousands of iterations
+1. **Game Setup**: Randomly select stack size and blind level for the game
+2. **Game Loop**: Repeat until one player is busted (stack = 0):
+   a. Deal random hole cards to both players
+   b. Assign random positions (while keeping stack sizes and blinds fixed)
+   c. Players act using their current learned strategies
+   d. Record the natural scenario that emerges from this hand
+   e. Calculate payoffs and update stacks
+   f. Update both players' strategies via CFR
+3. **Game Completion**: Record game statistics and move to next game
+4. **Training Loop**: Repeat for specified number of games
 
 ### Strategy Storage
 - Scenarios keyed by: `hand_category|position|stack_category|blinds_level`
