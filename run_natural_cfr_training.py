@@ -787,9 +787,21 @@ Examples:
   
   # Custom parameters with multi-core
   python run_natural_cfr_training.py --games 20000 --epsilon 0.05 --tournament-penalty 0.4 --workers 6
+  
+  # Window export mode with last 1000 games
+  python run_natural_cfr_training.py --export-scope window --export-window-games 1000 --export-min-visits 2
+  
+  # Cumulative export with min visits filtering
+  python run_natural_cfr_training.py --export-scope cumulative --export-min-visits 5
 
 Note: The --games parameter now specifies the number of complete poker games to simulate.
 Each game consists of multiple hands played with fixed stack and blind sizes until one player is busted.
+
+Export Modes:
+  --export-scope cumulative: Export all scenarios from all games (default)
+  --export-scope window: Export only scenarios from last N games (windowed view)
+  --export-window-games: Number of recent games to include in window export (default: 2000)
+  --export-min-visits: Minimum visits required for scenario to be included (default: 1)
         """
     )
     
