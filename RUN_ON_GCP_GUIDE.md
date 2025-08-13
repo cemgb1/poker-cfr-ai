@@ -182,6 +182,14 @@ The script accepts many configuration options. Here are the key parameters:
 | `--min-visits` | 5 | Minimum visits before scenario is considered trained |
 | `--tournament-penalty` | 0.2 | Tournament survival penalty factor |
 
+#### Export Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--export-scope` | cumulative | Export scope: `cumulative` (all games) or `window` (last N games) |
+| `--export-window-games` | 2000 | Number of recent games to include in window export |
+| `--export-min-visits` | 1 | Minimum visits required for scenario to be included in export |
+
 #### CFR Parameters
 
 | Parameter | Default | Description |
@@ -235,6 +243,26 @@ python run_natural_cfr_training.py \
     --games 20000 \
     --workers 1 \
     --epsilon 0.1
+```
+
+#### Windowed Export Training
+```bash
+# Export only scenarios from last 1000 games
+python run_natural_cfr_training.py \
+    --games 50000 \
+    --export-scope window \
+    --export-window-games 1000 \
+    --export-min-visits 2
+```
+
+#### High-Quality Export Training
+```bash
+# Cumulative export with quality filtering
+python run_natural_cfr_training.py \
+    --games 100000 \
+    --export-scope cumulative \
+    --export-min-visits 10 \
+    --workers 8
 ```
 
 ## 📊 Monitoring Training
@@ -374,6 +402,35 @@ gcloud compute scp poker-cfr-trainer:~/poker-cfr-ai/training_results_*.tar.gz . 
 ```
 
 ## 🔧 Troubleshooting
+
+### Export Modes
+
+The training system supports two export modes for scenario lookup tables:
+
+#### Cumulative Export (Default)
+```bash
+python run_natural_cfr_training.py --export-scope cumulative
+```
+- Exports all scenarios from all games played
+- Provides complete historical view
+- Best for final analysis and comprehensive strategy review
+
+#### Window Export
+```bash
+python run_natural_cfr_training.py --export-scope window --export-window-games 2000
+```
+- Exports scenarios from last N games only
+- Provides recent performance view
+- Better for monitoring current training effectiveness
+- Window buffer is ephemeral (not saved in checkpoints)
+
+#### Export Quality Control
+```bash
+python run_natural_cfr_training.py --export-min-visits 5
+```
+- Filters scenarios with insufficient visits
+- Higher values = higher quality but fewer scenarios
+- Recommended: 1 for exploration, 5+ for production
 
 ### Common Issues
 
