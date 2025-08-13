@@ -47,7 +47,7 @@ Classes:
 from enhanced_cfr_trainer_v2 import EnhancedCFRTrainer
 from enhanced_cfr_preflop_generator_v2 import (
     PREFLOP_HAND_RANGES, STACK_CATEGORIES, ACTIONS,
-    cards_to_str, simulate_enhanced_showdown
+    cards_to_str, simulate_enhanced_showdown, classify_hand_category
 )
 from treys import Card, Deck, Evaluator
 import numpy as np
@@ -152,6 +152,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             'avg_hands_per_game': 0.0  # Track average hands per game
         }
         
+        # NEW: Required aggregation features for problem statement
+        self.scenario_aggregation = {}  # Single in-memory dict keyed by scenario_key
+        self.hand_categories_seen = set()  # Set of hand categories encountered
+        self.scenario_classification_errors = 0  # Count of classification errors
+        self.total_scenarios_processed = 0  # Total scenarios for ratio calculations
+        
         self.logger.info("🎲 Natural Game CFR Trainer Initialized!")
         self.logger.info(f"   🎯 Epsilon exploration: {self.epsilon_exploration}")
         self.logger.info(f"   📊 Min visit threshold: {self.min_visit_threshold}")
@@ -163,6 +169,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         print(f"   📊 Min visit threshold: {self.min_visit_threshold}")
         print(f"   🏆 Tournament survival penalty: {self.tournament_survival_penalty}")
         print(f"   ✂️ Pruning enabled: {self.enable_pruning}")
+        
+        # Perform startup validation for hand categories
+        self._validate_hand_categories_at_startup()
     
     def is_realistic_scenario(self, scenario_key):
         """
@@ -298,29 +307,95 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         return True
     
-    def classify_hand_category(self, cards):
+    def _validate_hand_categories_at_startup(self):
         """
-        Classify a hand into one of the predefined hand categories.
+        At startup, classify a sample for each expected category and log PASS/FAIL.
+        
+        This ensures the hand categorizer is working correctly for all expected categories.
+        """
+        self.logger.info("🔍 Validating hand categorizer at startup...")
+        
+        # Sample hands for each category (using first hand from each range)
+        validation_samples = {}
+        
+        # Create sample cards for each category
+        from treys import Card
+        
+        test_cases = {
+            'premium_pairs': [Card.new('Ah'), Card.new('As')],  # AA
+            'medium_pairs': [Card.new('9h'), Card.new('9d')],   # 99
+            'small_pairs': [Card.new('5h'), Card.new('5d')],    # 55
+            'premium_aces': [Card.new('Ah'), Card.new('Ks')],   # AK offsuit
+            'medium_aces': [Card.new('Ah'), Card.new('Ts')],    # AT offsuit
+            'suited_broadway': [Card.new('Kh'), Card.new('Qh')], # KQ suited
+            'offsuit_broadway': [Card.new('Kh'), Card.new('Qs')], # KQ offsuit
+            'suited_connectors': [Card.new('9h'), Card.new('8h')], # 98 suited
+            'suited_gappers': [Card.new('Th'), Card.new('8h')],  # T8 suited
+            'weak_aces': [Card.new('Ah'), Card.new('4s')],      # A4 offsuit
+            'trash': [Card.new('7h'), Card.new('2c')]           # 72 offsuit
+        }
+        
+        passed = 0
+        failed = 0
+        
+        for expected_category, test_cards in test_cases.items():
+            try:
+                result = classify_hand_category(test_cards)
+                if result == expected_category:
+                    self.logger.info(f"  ✅ PASS: {expected_category} - {cards_to_str(test_cards)}")
+                    passed += 1
+                else:
+                    self.logger.error(f"  ❌ FAIL: {expected_category} - {cards_to_str(test_cards)} -> {result}")
+                    failed += 1
+            except Exception as e:
+                self.logger.error(f"  ❌ ERROR: {expected_category} - {cards_to_str(test_cards)} -> {e}")
+                failed += 1
+        
+        if failed == 0:
+            self.logger.info(f"🎉 Hand categorizer validation: ALL {passed} categories PASSED")
+            print(f"🎉 Hand categorizer validation: ALL {passed} categories PASSED")
+        else:
+            self.logger.error(f"⚠️ Hand categorizer validation: {passed} PASSED, {failed} FAILED")
+            print(f"⚠️ Hand categorizer validation: {passed} PASSED, {failed} FAILED")
+    
+    def classify_hand_category_with_logging(self, cards, game_id=None, position=None):
+        """
+        Classify a hand using the centralized categorizer with enhanced logging.
+        
+        Always uses the hand categorizer from enhanced_cfr_preflop_generator_v2.py.
+        Only assigns trash if classifier returns trash. Logs WARNING if classifier 
+        returns None/invalid.
         
         Args:
             cards: List of Card objects [card1, card2]
+            game_id: Game ID for logging (optional)
+            position: Player position for logging (optional)
             
         Returns:
-            str: Hand category from PREFLOP_HAND_RANGES
+            str: Hand category or 'trash' as fallback
         """
-        if len(cards) != 2:
-            return "trash"
-        
-        # Convert cards to string representation for lookup
-        hand_str = cards_to_str(cards)
-        
-        # Try both suited and offsuit versions
-        for category, hands in PREFLOP_HAND_RANGES.items():
-            if hand_str in hands:
-                return category
-        
-        # If not found in any category, classify as trash
-        return "trash"
+        try:
+            result = classify_hand_category(cards)
+            
+            if result is None:
+                # Classifier returned None/invalid - log WARNING
+                readable_cards = cards_to_str(cards)
+                self.scenario_classification_errors += 1
+                self.logger.warning(f"⚠️ Hand classifier returned None/invalid: "
+                                   f"cards={readable_cards}, game_id={game_id}, position={position}")
+                return 'trash'  # Only assign trash as fallback
+            
+            # Track hand category seen
+            self.hand_categories_seen.add(result)
+            return result
+            
+        except Exception as e:
+            # Unexpected error in classification - log WARNING
+            readable_cards = cards_to_str(cards) if cards else "None"
+            self.scenario_classification_errors += 1
+            self.logger.warning(f"⚠️ Hand classification error: "
+                               f"cards={readable_cards}, game_id={game_id}, position={position}, error={e}")
+            return 'trash'  # Only assign trash as fallback
     
     def classify_stack_category(self, stack_bb):
         """
@@ -394,9 +469,13 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         if blinds_level is None:
             blinds_level = random.choice(["low", "medium", "high"])
         
-        # Classify hands and stacks
-        hero_hand_category = self.classify_hand_category(hero_cards)
-        villain_hand_category = self.classify_hand_category(villain_cards)
+        # Classify hands and stacks using the centralized categorizer
+        hero_hand_category = self.classify_hand_category_with_logging(
+            hero_cards, game_id=f"game_{self.natural_metrics['games_played']}", position=hero_position
+        )
+        villain_hand_category = self.classify_hand_category_with_logging(
+            villain_cards, game_id=f"game_{self.natural_metrics['games_played']}", position=villain_position
+        )
         hero_stack_category = self.classify_stack_category(hero_stack_bb)
         villain_stack_category = self.classify_stack_category(villain_stack_bb)
         
@@ -548,16 +627,19 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def get_scenario_key_from_game_state(self, game_state, is_hero=True):
         """
-        Generate enhanced scenario key from current game state with caching.
+        Generate unified scenario key from current game state.
         
-        Updated to 7-column format: hand_category|position|stack_category|blinds_level|villain_stack_category|opponent_action|is_3bet
+        Updated to required format: '{hand_cat}|{position}|{stack_cat}|{blinds_level}|{villain_stack_cat}|{preflop_context}'
+        
+        The scenario_key is identical for hero/villain in the same situation to enable
+        unified aggregation as specified in the requirements.
         
         Args:
             game_state: Current game state
             is_hero: Whether key is for hero (True) or villain (False)
             
         Returns:
-            str: Enhanced scenario key for strategy lookup
+            str: Unified scenario key for strategy lookup and aggregation
         """
         # Create cache key
         cache_key = (
@@ -590,18 +672,24 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         blinds_level = game_state['blinds_level']
         
-        # Determine opponent action from action history
+        # Build preflop context from action history and game state
         action_history = game_state.get('action_history', [])
+        is_3bet = game_state.get('is_3bet', False)
         opponent_action = self._get_last_opponent_action(action_history, is_hero)
         
-        # Get 3-bet status
-        is_3bet = game_state.get('is_3bet', False)
+        # Create preflop context string 
+        context_parts = []
+        if opponent_action and opponent_action != 'none':
+            context_parts.append(f"opp_{opponent_action}")
+        if is_3bet:
+            context_parts.append("3bet")
+        if len(action_history) == 0:
+            context_parts.append("first_to_act")
         
-        # Convert to standardized format
-        opponent_action_str = str(opponent_action) if opponent_action else 'none'
-        is_3bet_str = 'True' if is_3bet else 'False'
+        preflop_context = "_".join(context_parts) if context_parts else "standard"
         
-        scenario_key = f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{opponent_action_str}|{is_3bet_str}"
+        # Build unified scenario key as specified: '{hand_cat}|{position}|{stack_cat}|{blinds_level}|{villain_stack_cat}|{preflop_context}'
+        scenario_key = f"{hand_category}|{position}|{stack_category}|{blinds_level}|{villain_stack_category}|{preflop_context}"
         
         # Cache the result
         self.scenario_key_cache[cache_key] = scenario_key
@@ -630,6 +718,92 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 return action_record.get('action', 'none')
         
         return 'none'
+    
+    def update_scenario_aggregation(self, scenario_key, action_taken):
+        """
+        Update the single in-memory dict keyed by scenario_key.
+        
+        Tracks visits and sum_{action} for each action bucket as specified.
+        Updates dict for acting player's action regardless of role.
+        
+        Args:
+            scenario_key: The unified scenario key
+            action_taken: The action that was taken
+        """
+        if scenario_key not in self.scenario_aggregation:
+            # Initialize entry for new scenario
+            self.scenario_aggregation[scenario_key] = {
+                'visits': 0,
+                'sum_fold': 0,
+                'sum_call_small': 0,
+                'sum_raise_small': 0, 
+                'sum_raise_mid': 0,
+                'sum_raise_high': 0
+            }
+        
+        # Increment visit count
+        self.scenario_aggregation[scenario_key]['visits'] += 1
+        
+        # Update action sum (map actions to the 5 specified buckets)
+        action_mapping = {
+            'fold': 'sum_fold',
+            'check': 'sum_call_small',  # Check maps to call_small bucket
+            'call_low': 'sum_call_small',
+            'call_mid': 'sum_call_small', 
+            'call_high': 'sum_call_small',
+            'raise_low': 'sum_raise_small',
+            'raise_mid': 'sum_raise_mid',
+            'raise_high': 'sum_raise_high',
+            'shove': 'sum_raise_high'  # Shove maps to raise_high bucket
+        }
+        
+        if action_taken in action_mapping:
+            bucket = action_mapping[action_taken]
+            self.scenario_aggregation[scenario_key][bucket] += 1
+        
+        # Update total scenarios processed for ratios
+        self.total_scenarios_processed += 1
+    
+    def log_periodic_metrics(self):
+        """
+        Log periodic metrics: category_coverage, trash_ratio, distinct_scenarios.
+        
+        Also logs HIGH PRIORITY WARNING if trash_ratio > 80% after 1,000 scenarios.
+        """
+        if self.total_scenarios_processed == 0:
+            return
+        
+        # Calculate metrics
+        category_coverage = len(self.hand_categories_seen)
+        distinct_scenarios = len(self.scenario_aggregation)
+        
+        # Calculate trash ratio
+        trash_count = sum(1 for cat in self.hand_categories_seen if cat == 'trash')
+        trash_ratio = trash_count / len(self.hand_categories_seen) if self.hand_categories_seen else 0.0
+        
+        # Log metrics
+        self.logger.info(f"📊 Periodic metrics: category_coverage={category_coverage}, "
+                        f"distinct_scenarios={distinct_scenarios}, trash_ratio={trash_ratio:.3f}")
+        
+        # Check for high trash ratio warning after 1,000 scenarios
+        if self.total_scenarios_processed >= 1000 and trash_ratio > 0.8:
+            self.logger.warning(f"🚨 HIGH PRIORITY WARNING: trash_ratio > 80% "
+                              f"({trash_ratio:.1%}) after {self.total_scenarios_processed} scenarios")
+            print(f"🚨 HIGH PRIORITY WARNING: trash_ratio > 80% ({trash_ratio:.1%})")
+    
+    def log_game_summary(self):
+        """
+        Log game summary with hand categories seen.
+        """
+        hand_cats_seen = sorted(list(self.hand_categories_seen))
+        self.logger.info(f"🎮 Game summary: hand_cats_seen={hand_cats_seen}")
+        
+        # Also log current aggregation stats
+        if self.scenario_aggregation:
+            total_visits = sum(entry['visits'] for entry in self.scenario_aggregation.values())
+            avg_visits = total_visits / len(self.scenario_aggregation)
+            self.logger.info(f"📈 Aggregation stats: {len(self.scenario_aggregation)} scenarios, "
+                           f"{total_visits} total visits, {avg_visits:.1f} avg visits per scenario")
     
     def should_explore(self, scenario_key, action, is_hero=True):
         """
@@ -815,6 +989,10 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 'action': action,
                 'is_hero': is_hero_turn
             })
+            
+            # Update scenario aggregation for the acting player
+            scenario_key = self.get_scenario_key_from_game_state(game_state, is_hero_turn)
+            self.update_scenario_aggregation(scenario_key, action)
             
             # Update game state based on action
             self.update_game_state_with_action(game_state, action, is_hero_turn)
@@ -1411,6 +1589,8 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             # Log progress
             if (game_num + 1) % log_interval == 0:
                 self.log_training_progress(game_num + 1, training_start_time, total_hands_played)
+                # Add periodic metrics logging
+                self.log_periodic_metrics()
             
             # Save progress and cleanup memory
             if (game_num + 1) % save_interval == 0:
@@ -1418,6 +1598,12 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 self.save_training_state(checkpoint_file)
                 # Perform memory cleanup after saving
                 self._cleanup_memory()
+                # Export scenario lookup table regularly
+                self.export_scenario_lookup_table_csv("scenario_lookup_table.csv")
+            
+            # Log game summary every 1000 games
+            if (game_num + 1) % 1000 == 0:
+                self.log_game_summary()
             
             # Additional memory cleanup at regular intervals
             elif (game_num + 1) % self.memory_cleanup_interval == 0:
@@ -1581,6 +1767,11 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 'natural_scenario_counter': dict(self.natural_scenario_counter),
                 'state_action_visits': dict(self.state_action_visits),
                 'natural_metrics': self.natural_metrics,
+                # NEW: Include scenario aggregation data for checkpoint restoration
+                'scenario_aggregation': dict(self.scenario_aggregation),
+                'hand_categories_seen': list(self.hand_categories_seen),
+                'scenario_classification_errors': self.scenario_classification_errors,
+                'total_scenarios_processed': self.total_scenarios_processed,
                 'training_parameters': {
                     'epsilon_exploration': self.epsilon_exploration,
                     'min_visit_threshold': self.min_visit_threshold,
@@ -1644,6 +1835,20 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             self.natural_scenario_counter = Counter(save_data['natural_scenario_counter'])
             self.state_action_visits = defaultdict(lambda: defaultdict(int), save_data['state_action_visits'])
             self.natural_metrics = save_data['natural_metrics']
+            
+            # NEW: Restore scenario aggregation if present, else initialize empty
+            if 'scenario_aggregation' in save_data:
+                self.scenario_aggregation = save_data['scenario_aggregation']
+                self.hand_categories_seen = set(save_data.get('hand_categories_seen', []))
+                self.scenario_classification_errors = save_data.get('scenario_classification_errors', 0)
+                self.total_scenarios_processed = save_data.get('total_scenarios_processed', 0)
+                self.logger.info(f"   ✅ Restored scenario aggregation: {len(self.scenario_aggregation)} scenarios")
+            else:
+                self.scenario_aggregation = {}
+                self.hand_categories_seen = set()
+                self.scenario_classification_errors = 0
+                self.total_scenarios_processed = 0
+                self.logger.info("   🔄 Initialized empty scenario aggregation (legacy checkpoint)")
             
             # Log loaded state information
             self.logger.info("✅ Training state loaded successfully")
@@ -2257,6 +2462,108 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 self.logger.error(f"Failed to export enhanced lookup table: {e}")
         else:
             self.logger.info("📊 No scenario data available yet for enhanced lookup table export")
+    
+    def export_scenario_lookup_table_csv(self, filename="scenario_lookup_table.csv"):
+        """
+        Export CSV in the exact format specified in the requirements:
+        scenario_key,hand_cat,position,stack_cat,blinds_level,villain_stack_cat,preflop_context,visits,pct_fold,pct_call_small,pct_raise_small,pct_raise_mid,pct_raise_high
+        
+        - All pct_* values in [0,1], rounded to 4dp
+        - Atomic writes (.tmp then os.replace)
+        - Export from main process only (workers send updates via IPC)
+        - Unique per scenario, not duplicated by role
+        """
+        self.logger.info(f"📊 Exporting scenario lookup table to {filename}...")
+        
+        if not self.scenario_aggregation:
+            self.logger.warning("No scenario aggregation data available for export")
+            return False
+        
+        try:
+            # Use atomic write pattern: write to .tmp file then replace
+            tmp_filename = filename + ".tmp"
+            
+            export_data = []
+            
+            for scenario_key, agg_data in self.scenario_aggregation.items():
+                # Parse scenario key: '{hand_cat}|{position}|{stack_cat}|{blinds_level}|{villain_stack_cat}|{preflop_context}'
+                parts = scenario_key.split('|')
+                if len(parts) != 6:
+                    self.logger.warning(f"Skipping malformed scenario key: {scenario_key}")
+                    continue
+                
+                hand_cat, position, stack_cat, blinds_level, villain_stack_cat, preflop_context = parts
+                
+                visits = agg_data['visits']
+                if visits == 0:
+                    continue  # Skip scenarios with no visits
+                
+                # Calculate percentages in [0,1] range, rounded to 4dp
+                pct_fold = round(agg_data['sum_fold'] / visits, 4)
+                pct_call_small = round(agg_data['sum_call_small'] / visits, 4)
+                pct_raise_small = round(agg_data['sum_raise_small'] / visits, 4)
+                pct_raise_mid = round(agg_data['sum_raise_mid'] / visits, 4)
+                pct_raise_high = round(agg_data['sum_raise_high'] / visits, 4)
+                
+                # Ensure percentages sum to 1.0 (handle rounding errors)
+                total_pct = pct_fold + pct_call_small + pct_raise_small + pct_raise_mid + pct_raise_high
+                if total_pct > 0:
+                    # Normalize to ensure sum = 1.0
+                    pct_fold = round(pct_fold / total_pct, 4)
+                    pct_call_small = round(pct_call_small / total_pct, 4)
+                    pct_raise_small = round(pct_raise_small / total_pct, 4)
+                    pct_raise_mid = round(pct_raise_mid / total_pct, 4)
+                    pct_raise_high = round(pct_raise_high / total_pct, 4)
+                
+                row_data = {
+                    'scenario_key': scenario_key,
+                    'hand_cat': hand_cat,
+                    'position': position,
+                    'stack_cat': stack_cat,
+                    'blinds_level': blinds_level,
+                    'villain_stack_cat': villain_stack_cat,
+                    'preflop_context': preflop_context,
+                    'visits': visits,
+                    'pct_fold': pct_fold,
+                    'pct_call_small': pct_call_small,
+                    'pct_raise_small': pct_raise_small,
+                    'pct_raise_mid': pct_raise_mid,
+                    'pct_raise_high': pct_raise_high
+                }
+                export_data.append(row_data)
+            
+            if not export_data:
+                self.logger.warning("No valid scenario data to export")
+                return False
+            
+            # Write to temporary file first (atomic write)
+            df = pd.DataFrame(export_data)
+            df.to_csv(tmp_filename, index=False)
+            
+            # Atomic replace operation
+            import os
+            os.replace(tmp_filename, filename)
+            
+            self.logger.info(f"✅ Exported {len(export_data)} scenarios to {filename}")
+            self.logger.info(f"   Unique scenarios (role-agnostic): {len(self.scenario_aggregation)}")
+            
+            # Log variety statistics
+            categories_found = len(set(row['hand_cat'] for row in export_data))
+            contexts_found = len(set(row['preflop_context'] for row in export_data))
+            self.logger.info(f"   Hand categories: {categories_found}, Preflop contexts: {contexts_found}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to export scenario lookup table: {e}")
+            # Clean up tmp file if it exists
+            try:
+                import os
+                if os.path.exists(tmp_filename):
+                    os.remove(tmp_filename)
+            except:
+                pass
+            return False
     
     def _calculate_enhanced_scenario_metrics(self, scenario_key, is_hero=True):
         """
