@@ -444,6 +444,66 @@ def cards_to_str(cards):
     """Convert card integers to readable strings"""
     return " ".join([Card.int_to_pretty_str(c) for c in cards])
 
+def classify_hand_category(cards):
+    """
+    Classify a hand into one of the predefined hand categories.
+    
+    This is the authoritative hand categorizer that should be used everywhere
+    in the codebase for consistent classification.
+    
+    Args:
+        cards: List of Card objects [card1, card2]
+        
+    Returns:
+        str: Hand category from PREFLOP_HAND_RANGES, or None if invalid input
+    """
+    if not cards or len(cards) != 2:
+        return None
+    
+    try:
+        # Extract ranks and suits
+        card1, card2 = cards
+        rank1 = Card.get_rank_int(card1)
+        rank2 = Card.get_rank_int(card2)
+        suit1 = Card.get_suit_int(card1)
+        suit2 = Card.get_suit_int(card2)
+        
+        # Convert rank integers to characters
+        rank_chars = "23456789TJQKA"
+        rank1_char = rank_chars[rank1]
+        rank2_char = rank_chars[rank2]
+        
+        # Determine if suited
+        is_suited = (suit1 == suit2)
+        
+        # Handle pocket pairs
+        if rank1 == rank2:
+            hand_notation = rank1_char + rank2_char  # e.g., "AA", "KK"
+        else:
+            # Sort ranks by strength (higher rank first)
+            if rank1 > rank2:
+                high_rank, low_rank = rank1_char, rank2_char
+            else:
+                high_rank, low_rank = rank2_char, rank1_char
+            
+            # Build notation with suited/offsuit indicator
+            if is_suited:
+                hand_notation = high_rank + low_rank + "s"  # e.g., "AKs"
+            else:
+                hand_notation = high_rank + low_rank + "o"  # e.g., "AKo"
+        
+        # Search through hand categories
+        for category, hands in PREFLOP_HAND_RANGES.items():
+            if hand_notation in hands:
+                return category
+        
+        # If not found in any category, classify as trash
+        return "trash"
+        
+    except Exception:
+        # Return None for any classification errors (invalid cards, etc.)
+        return None
+
 if __name__ == "__main__":
     # Test enhanced scenario generation
     scenarios = generate_enhanced_scenarios()
