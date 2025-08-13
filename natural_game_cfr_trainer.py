@@ -74,7 +74,8 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
     
     def __init__(self, enable_pruning=True, regret_pruning_threshold=-300.0,
                  strategy_pruning_threshold=0.001, tournament_survival_penalty=0.2,
-                 epsilon_exploration=0.1, min_visit_threshold=5, logger=None):
+                 epsilon_exploration=0.1, min_visit_threshold=5, logger=None,
+                 export_scope='cumulative', export_window_games=2000, export_min_visits=1):
         """
         Initialize Natural Game CFR Trainer.
         
@@ -86,6 +87,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             epsilon_exploration: Probability of forced exploration
             min_visit_threshold: Minimum visits before considering scenario trained
             logger: Logger instance for logging (optional)
+            export_scope: Export scope - 'cumulative' or 'window' (default: 'cumulative')
+            export_window_games: Number of recent games for window export (default: 2000)
+            export_min_visits: Minimum visits for scenario to be included in export (default: 1)
         """
         # Store logger
         from logging_config import get_logger
@@ -100,6 +104,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         self.logger.info(f"  - tournament_survival_penalty: {tournament_survival_penalty}")
         self.logger.info(f"  - epsilon_exploration: {epsilon_exploration}")
         self.logger.info(f"  - min_visit_threshold: {min_visit_threshold}")
+        self.logger.info(f"  - export_scope: {export_scope}")
+        self.logger.info(f"  - export_window_games: {export_window_games}")
+        self.logger.info(f"  - export_min_visits: {export_min_visits}")
         
         # Initialize base trainer without pre-defined scenarios
         super().__init__(
@@ -113,6 +120,17 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Natural game simulation parameters
         self.epsilon_exploration = epsilon_exploration
         self.min_visit_threshold = min_visit_threshold
+        
+        # Export configuration parameters
+        self.export_scope = export_scope
+        self.export_window_games = export_window_games
+        self.export_min_visits = export_min_visits
+        
+        # Window buffer system for windowed export (FIFO queue of per-game deltas)
+        from collections import deque
+        self.window_game_deltas = deque(maxlen=export_window_games)  # FIFO queue
+        self.window_summary = {}  # Aggregated summary from window
+        self.current_game_deltas = {}  # Track deltas for current game
         
         # Visit tracking for epsilon-greedy exploration
         self.state_action_visits = defaultdict(lambda: defaultdict(int))
@@ -725,11 +743,13 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         Tracks visits and sum_{action} for each action bucket as specified.
         Updates dict for acting player's action regardless of role.
+        Also tracks deltas for current game for window buffer.
         
         Args:
             scenario_key: The unified scenario key
             action_taken: The action that was taken
         """
+        # Update cumulative aggregation
         if scenario_key not in self.scenario_aggregation:
             # Initialize entry for new scenario
             self.scenario_aggregation[scenario_key] = {
@@ -743,6 +763,18 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         
         # Increment visit count
         self.scenario_aggregation[scenario_key]['visits'] += 1
+        
+        # Track per-game deltas for window buffer
+        if scenario_key not in self.current_game_deltas:
+            self.current_game_deltas[scenario_key] = {
+                'visits': 0,
+                'sum_fold': 0,
+                'sum_call_small': 0,
+                'sum_raise_small': 0, 
+                'sum_raise_mid': 0,
+                'sum_raise_high': 0
+            }
+        self.current_game_deltas[scenario_key]['visits'] += 1
         
         # Update action sum (map actions to the 5 specified buckets)
         action_mapping = {
@@ -760,9 +792,47 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         if action_taken in action_mapping:
             bucket = action_mapping[action_taken]
             self.scenario_aggregation[scenario_key][bucket] += 1
+            self.current_game_deltas[scenario_key][bucket] += 1
         
         # Update total scenarios processed for ratios
         self.total_scenarios_processed += 1
+    
+    def finalize_game_for_window(self):
+        """
+        Finalize current game deltas and add to window buffer.
+        Called at end of each game to update window buffer.
+        """
+        if self.current_game_deltas:
+            # Add current game deltas to window buffer (FIFO queue)
+            self.window_game_deltas.append(dict(self.current_game_deltas))
+            
+            # Rebuild window summary from all games in buffer
+            self._rebuild_window_summary()
+            
+            # Clear current game deltas for next game
+            self.current_game_deltas = {}
+    
+    def _rebuild_window_summary(self):
+        """
+        Rebuild window summary by aggregating all game deltas in the window buffer.
+        """
+        self.window_summary = {}
+        
+        for game_deltas in self.window_game_deltas:
+            for scenario_key, deltas in game_deltas.items():
+                if scenario_key not in self.window_summary:
+                    self.window_summary[scenario_key] = {
+                        'visits': 0,
+                        'sum_fold': 0,
+                        'sum_call_small': 0,
+                        'sum_raise_small': 0, 
+                        'sum_raise_mid': 0,
+                        'sum_raise_high': 0
+                    }
+                
+                # Add deltas to window summary
+                for key, value in deltas.items():
+                    self.window_summary[scenario_key][key] += value
     
     def log_periodic_metrics(self):
         """
@@ -1117,6 +1187,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         # Update game-level metrics
         self.natural_metrics['games_played'] += 1
         total_hands = len(hands_played)
+        
+        # Finalize current game for window buffer
+        self.finalize_game_for_window()
         
         self.logger.info(f"Game completed: {total_hands} hands, winner: {game_winner}, "
                         f"duration: {game_duration:.2f}s, stacks: Hero {hero_stack_bb:.1f}bb, Villain {villain_stack_bb:.1f}bb")
@@ -1591,6 +1664,11 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 self.log_training_progress(game_num + 1, training_start_time, total_hands_played)
                 # Add periodic metrics logging
                 self.log_periodic_metrics()
+                # Export scenario lookup table at log intervals as well
+                try:
+                    self.export_scenario_lookup_table_csv("scenario_lookup_table.csv")
+                except Exception as export_error:
+                    self.logger.warning(f"⚠️ Scenario lookup table export failed: {export_error}")
             
             # Save progress and cleanup memory
             if (game_num + 1) % save_interval == 0:
@@ -2472,20 +2550,61 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
         - Atomic writes (.tmp then os.replace)
         - Export from main process only (workers send updates via IPC)
         - Unique per scenario, not duplicated by role
+        - Supports both cumulative and window export scope
+        - Enhanced logging with pre-export stats and warnings
         """
         self.logger.info(f"📊 Exporting scenario lookup table to {filename}...")
         
-        if not self.scenario_aggregation:
-            self.logger.warning("No scenario aggregation data available for export")
+        # Select source dict based on export scope
+        if self.export_scope == 'window':
+            source_dict = self.window_summary
+            scope_description = f"window (last {len(self.window_game_deltas)} games of {self.export_window_games} max)"
+        else:  # cumulative
+            source_dict = self.scenario_aggregation
+            scope_description = "cumulative (all games)"
+        
+        self.logger.info(f"📊 Export scope: {self.export_scope} - {scope_description}")
+        
+        if not source_dict:
+            self.logger.warning(f"No {self.export_scope} scenario data available for export")
             return False
+        
+        # Pre-export logging: calculate stats before filtering
+        total_scenarios = len(source_dict)
+        total_visits = sum(data['visits'] for data in source_dict.values())
+        
+        # Calculate category coverage and trash ratio
+        hand_categories = set()
+        trash_count = 0
+        for scenario_key in source_dict.keys():
+            parts = scenario_key.split('|')
+            if len(parts) >= 1:
+                hand_cat = parts[0]
+                hand_categories.add(hand_cat)
+                if hand_cat == 'trash':
+                    trash_count += 1
+        
+        category_coverage = len(hand_categories)
+        trash_ratio = trash_count / total_scenarios if total_scenarios > 0 else 0
+        
+        # Log pre-export stats
+        self.logger.info(f"📊 Pre-export stats: {total_scenarios} scenarios, {total_visits} total visits")
+        self.logger.info(f"📊 Category coverage: {category_coverage} unique hand categories")
+        self.logger.info(f"📊 Trash ratio: {trash_ratio:.3f} ({trash_count}/{total_scenarios})")
+        
+        # Log WARNING if trash ratio > 0.8 and >100 rows
+        if trash_ratio > 0.8 and total_scenarios > 100:
+            self.logger.warning(f"⚠️ HIGH TRASH RATIO: {trash_ratio:.1%} trash scenarios ({trash_count}/{total_scenarios})")
+            self.logger.warning("⚠️ Consider reviewing hand classification or training parameters")
         
         try:
             # Use atomic write pattern: write to .tmp file then replace
             tmp_filename = filename + ".tmp"
             
             export_data = []
+            scenarios_filtered_by_visits = 0
             
-            for scenario_key, agg_data in self.scenario_aggregation.items():
+            for scenario_key, agg_data in source_dict.items():
                 # Parse scenario key: '{hand_cat}|{position}|{stack_cat}|{blinds_level}|{villain_stack_cat}|{preflop_context}'
                 parts = scenario_key.split('|')
                 if len(parts) != 6:
@@ -2495,8 +2614,11 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 hand_cat, position, stack_cat, blinds_level, villain_stack_cat, preflop_context = parts
                 
                 visits = agg_data['visits']
-                if visits == 0:
-                    continue  # Skip scenarios with no visits
+                
+                # Filter by min visits
+                if visits < self.export_min_visits:
+                    scenarios_filtered_by_visits += 1
+                    continue
                 
                 # Calculate percentages in [0,1] range, rounded to 4dp
                 pct_fold = round(agg_data['sum_fold'] / visits, 4)
@@ -2533,7 +2655,9 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
                 export_data.append(row_data)
             
             if not export_data:
-                self.logger.warning("No valid scenario data to export")
+                self.logger.warning(f"No valid scenario data to export after filtering (min_visits={self.export_min_visits})")
+                if scenarios_filtered_by_visits > 0:
+                    self.logger.warning(f"Filtered out {scenarios_filtered_by_visits} scenarios due to insufficient visits")
                 return False
             
             # Write to temporary file first (atomic write)
@@ -2544,13 +2668,11 @@ class NaturalGameCFRTrainer(EnhancedCFRTrainer):
             import os
             os.replace(tmp_filename, filename)
             
-            self.logger.info(f"✅ Exported {len(export_data)} scenarios to {filename}")
-            self.logger.info(f"   Unique scenarios (role-agnostic): {len(self.scenario_aggregation)}")
-            
-            # Log variety statistics
-            categories_found = len(set(row['hand_cat'] for row in export_data))
-            contexts_found = len(set(row['preflop_context'] for row in export_data))
-            self.logger.info(f"   Hand categories: {categories_found}, Preflop contexts: {contexts_found}")
+            # Lightweight logs on export completion
+            self.logger.info(f"✅ Export completed: scope={self.export_scope}, window_games={len(self.window_game_deltas)}, min_visits={self.export_min_visits}, rows_written={len(export_data)}")
+            self.logger.info(f"   Scenarios before filtering: {total_scenarios}, after min_visits filter: {len(export_data)}")
+            if scenarios_filtered_by_visits > 0:
+                self.logger.info(f"   Filtered by min_visits: {scenarios_filtered_by_visits}")
             
             return True
             

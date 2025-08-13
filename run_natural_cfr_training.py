@@ -86,7 +86,10 @@ def multiprocessing_worker(worker_id, games_per_worker, args):
         tournament_survival_penalty=args.tournament_penalty,
         epsilon_exploration=args.epsilon,
         min_visit_threshold=args.min_visits,
-        logger=worker_logger
+        logger=worker_logger,
+        export_scope=args.export_scope,
+        export_window_games=args.export_window_games,
+        export_min_visits=args.export_min_visits
     )
     
     # Load checkpoint if this is worker 0 and resume is specified or auto-found
@@ -379,7 +382,10 @@ def run_natural_cfr_training(args):
             tournament_survival_penalty=args.tournament_penalty,
             epsilon_exploration=args.epsilon,
             min_visit_threshold=args.min_visits,
-            logger=logger
+            logger=logger,
+            export_scope=args.export_scope,
+            export_window_games=args.export_window_games,
+            export_min_visits=args.export_min_visits
         )
         logger.info("Trainer initialized successfully")
         
@@ -569,7 +575,10 @@ def run_demo_mode(args):
         epsilon_exploration=0.2,  # Higher exploration for demo
         min_visit_threshold=3,    # Lower threshold for demo
         tournament_survival_penalty=0.2,
-        logger=logger
+        logger=logger,
+        export_scope=args.export_scope,
+        export_window_games=args.export_window_games,
+        export_min_visits=args.export_min_visits
     )
     logger.info("Demo trainer initialized successfully")
     
@@ -818,6 +827,14 @@ Each game consists of multiple hands played with fixed stack and blind sizes unt
     parser.add_argument('--resume', type=str, default=None,
                        help='Resume from checkpoint file')
     
+    # Export configuration
+    parser.add_argument('--export-scope', choices=['cumulative', 'window'], default='cumulative',
+                       help='Export scope for scenario lookup table: cumulative (all games) or window (last N games) (default: cumulative)')
+    parser.add_argument('--export-window-games', type=int, default=2000,
+                       help='Number of recent games to include in window export (default: 2000)')
+    parser.add_argument('--export-min-visits', type=int, default=1,
+                       help='Minimum visits required for scenario to be included in export (default: 1)')
+    
     args = parser.parse_args()
     
     # Set up main logger for argument validation and main execution
@@ -855,6 +872,19 @@ Each game consists of multiple hands played with fixed stack and blind sizes unt
         error_msg = "Analysis mode requires --resume checkpoint file"
         logger.error(error_msg)
         print("❌ Analysis mode requires --resume checkpoint file")
+        sys.exit(1)
+    
+    # Validate export arguments
+    if args.export_window_games <= 0:
+        error_msg = "Export window games must be positive"
+        logger.error(error_msg)
+        print("❌ Export window games must be positive")
+        sys.exit(1)
+        
+    if args.export_min_visits < 0:
+        error_msg = "Export min visits must be non-negative"
+        logger.error(error_msg)
+        print("❌ Export min visits must be non-negative")
         sys.exit(1)
     
     logger.info("Arguments validated successfully")
